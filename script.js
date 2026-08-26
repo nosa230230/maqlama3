@@ -9,25 +9,120 @@ const ENV = window.MAQLAMA_ENV || {};
 const SUPABASE_URL = ENV.SUPABASE_URL;
 const SUPABASE_KEY = ENV.SUPABASE_KEY;
 const BUCKET       = ENV.STORAGE_BUCKET || 'maqlama';
+const LESSON_BUCKET = ENV.STORAGE_LESSON_BUCKET || 'maqlama-lessons'; // bucket خاص (private) لملفات المحاضرات، محمي بصلاحيات حقيقية من قاعدة البيانات
 const AUTH_DOMAIN  = ENV.AUTH_DOMAIN || 'maqlama.local';
 const CACHE_KEY    = 'maqlama_cache_v2';
+
+/* ===================================================================
+ * جلسة الجهاز الواحد (Single Device Session)
+ * كل متصفح/جهاز يولّد معرّفاً عشوائياً ثابتاً (مخزَّن في localStorage
+ * الخاص به فقط) ويُرسله مع كل طلب عبر الهيدر x-device-session.
+ * قاعدة البيانات (وليس هذا الملف) هي من يقرّر من الجهاز النشط فعلياً.
+ * =================================================================== */
+const DEVICE_ID_KEY = 'maqlama_device_id';
+function getOrCreateDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    // localStorage غير متاح (وضع خاص متشدد مثلاً) — نولّد معرّفاً لهذه الجلسة فقط
+    return 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  }
+}
+const DEVICE_ID = getOrCreateDeviceId();
+function deviceLabel() {
+  const ua = navigator.userAgent || '';
+  const platform = /Mobi|Android|iPhone|iPad/i.test(ua) ? 'جهاز محمول' : 'كمبيوتر';
+  let browser = 'متصفح';
+  if (/Edg\//.test(ua)) browser = 'Edge';
+  else if (/OPR\//.test(ua)) browser = 'Opera';
+  else if (/Chrome\//.test(ua)) browser = 'Chrome';
+  else if (/Firefox\//.test(ua)) browser = 'Firefox';
+  else if (/Safari\//.test(ua)) browser = 'Safari';
+  return `${platform} - ${browser}`;
+}
 
 let sb = null;
 try {
   if (window.supabase && SUPABASE_URL && SUPABASE_KEY && !SUPABASE_URL.includes('YOUR-PROJECT')) {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, storageKey: 'maqlama_auth' },
-      realtime: { params: { eventsPerSecond: 10 } }
+      realtime: { params: { eventsPerSecond: 10 } },
+      global: { headers: { 'x-device-session': DEVICE_ID } }
     });
   }
 } catch (e) { console.error('Supabase init failed', e); }
 
 function requireSb(){ if(!sb){ toast('Supabase غير مفعّل','عدّل env.js','error'); throw new Error('no supabase'); } return sb; }
 
+/* ===================================================================
+ * روابط التواصل الاجتماعي — عدّل الروابط من هنا فقط (مكان واحد بالكود)
+ * اترك القيمة فارغة '' لأي منصة ليس لها رابط حالياً — لن تظهر أيقونتها
+ * في الفوتر إلا بعد إضافة رابط حقيقي هنا.
+ * مثال:
+ *   facebook: 'https://facebook.com/maqlama'
+ *   telegram: 'https://t.me/maqlama'
+ *   whatsapp: 'https://wa.me/9665XXXXXXXX'
+ * =================================================================== */
+const SOCIAL_LINKS = {
+  facebook:  '', // ضع رابط صفحة الفيسبوك هنا
+  telegram:  '', // ضع رابط قناة/جروب التيليجرام هنا
+  whatsapp:  '', // ضع رابط واتساب هنا، مثل: https://wa.me/9665XXXXXXXX
+  instagram: '', // ضع رابط الإنستغرام هنا
+  youtube:   '', // ضع رابط قناة اليوتيوب هنا
+};
+
+const SOCIAL_META = {
+  facebook:  { label: 'فيسبوك',   icon: 'fa-brands fa-facebook-f' },
+  telegram:  { label: 'تيليجرام', icon: 'fa-brands fa-telegram'   },
+  whatsapp:  { label: 'واتساب',   icon: 'fa-brands fa-whatsapp'   },
+  instagram: { label: 'إنستغرام', icon: 'fa-brands fa-instagram'  },
+  youtube:   { label: 'يوتيوب',   icon: 'fa-brands fa-youtube'    },
+};
+
+function renderFooterSocial() {
+  const wrap = document.getElementById('footerSocial');
+  if (!wrap) return;
+  const items = Object.keys(SOCIAL_META).map(key => {
+    const url = (SOCIAL_LINKS[key] || '').trim();
+    const meta = SOCIAL_META[key];
+    if (!url) {
+      // لا يوجد رابط حقيقي بعد: نعرض الأيقونة معطّلة بدل اختراع رابط
+      return `<span class="social-link disabled" title="سيتم إضافة رابط ${meta.label} قريبًا" aria-disabled="true">
+        <i class="${meta.icon}"></i>
+      </span>`;
+    }
+    return `<a class="social-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" aria-label="${meta.label}" title="${meta.label}">
+      <i class="${meta.icon}"></i>
+    </a>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="footer-social-title">تواصل معنا</div>
+    <div class="footer-social-icons">${items}</div>
+  `;
+}
+
 /* ============== Helpers ============== */
 const $  = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
 const fmtDate = t => new Date(t).toLocaleDateString('ar-EG', { day:'numeric', month:'short', year:'numeric' });
+const fmtDateTime = t => new Date(t).toLocaleString('ar-EG', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+const fmtCountdown = ms => {
+  if (ms < 0) ms = 0;
+  const totalSec = Math.floor(ms/1000);
+  const h = Math.floor(totalSec/3600);
+  const m = Math.floor((totalSec%3600)/60);
+  const s = totalSec%60;
+  const mm = String(m).padStart(2,'0'), ss = String(s).padStart(2,'0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
 const fmtTime = t => {
   const diff = Date.now() - new Date(t).getTime();
   if (diff < 60000) return 'الآن';
@@ -36,6 +131,15 @@ const fmtTime = t => {
   return fmtDate(t);
 };
 const escapeHtml = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// يتحقق أن الرابط http/https فعلياً قبل استخدامه كـ src/href — يمنع حقن
+// روابط "javascript:" أو أي مخطط آخر قد يُنفَّذ في المتصفح (مثلاً عبر
+// attachment_url في رسائل الشات، وهو حقل يقدر أي مستخدم مسجَّل تعيينه).
+function safeUrl(u) {
+  try {
+    const url = new URL(String(u||''), location.href);
+    return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+  } catch { return ''; }
+}
 const usernameToEmail = u => u.includes('@') ? u : `${u.toLowerCase().replace(/[^a-z0-9_.]/g,'')}@${AUTH_DOMAIN}`;
 
 function toast(title, body='', type='info') {
@@ -80,7 +184,8 @@ const State = {
   pathEnrollments: [],
   quizzes: [],
   myQuizAttempts: [],   // current user's own quiz results
-  profiles: [],         // all users (admin uses; students use it for chat avatars)
+  profiles: [],         // admin: every profile. student: RLS only ever returns their own row.
+  presence: {},         // uid -> online boolean, fetched narrowly for chat (see chat_presence RPC)
   notifications: [],
   liveStream: null,
   settings: { theme: localStorage.getItem('maqlama_theme') || 'light' },
@@ -114,12 +219,96 @@ async function signIn(usernameOrEmail, password) {
 }
 
 async function signOut() {
+  try { await sb.rpc('release_device_session', { p_device_id: DEVICE_ID }); } catch{}
   try { await sb.auth.signOut(); } catch{}
+  stopSessionHeartbeat();
   State.user = null; State.session = null;
   unsubscribeAll();
+  _mbTop = null;
   $('#appShell').classList.add('hidden');
   $('#loginPage').classList.remove('hidden');
   toast('تم تسجيل الخروج','','info');
+}
+
+/* ============== جلسة الجهاز الواحد: تفعيل + مراقبة ============== */
+let sessionKicked = false;
+
+// يُستدعى بعد كل دخول ناجح (طالب فقط): يحجز هذا الجهاز كجلسة نشطة
+// وحيدة على مستوى القاعدة، ثم يطلب من Auth إلغاء أي جلسات (refresh
+// tokens) أخرى لنفس الحساب من الخادم مباشرة — هذا هو المنع الحقيقي
+// من الـ Backend، وليس مجرد إخفاء واجهة.
+async function enforceSingleDeviceSession() {
+  if (!State.user || State.user.role === 'admin') return; // الأدمن مستثنى عمداً
+  sessionKicked = false;
+  try {
+    const { data, error } = await sb.rpc('claim_device_session', {
+      p_device_id: DEVICE_ID, p_device_label: deviceLabel()
+    });
+    if (error) console.error('claim_device_session error', error);
+    else if (data && data.took_over) {
+      toast('تنبيه', 'كان حسابك مفتوحاً على جهاز آخر — تم إنهاء تلك الجلسة تلقائياً وتفعيل حسابك على هذا الجهاز.', 'warning');
+    }
+  } catch (e) { console.error('claim_device_session failed', e); }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/session-guard`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': SUPABASE_KEY
+        },
+        body: JSON.stringify({ deviceId: DEVICE_ID })
+      });
+      if (!res.ok) console.warn('session-guard responded with', res.status);
+    }
+  } catch (e) {
+    // لا نمنع تسجيل الدخول لو فشل استدعاء الـ Edge Function (مثلاً غير
+    // منشورة بعد) — الحماية الأساسية (claim_device_session + Realtime
+    // + RLS) تستمر بالعمل رغم ذلك.
+    console.warn('session-guard call failed (non-fatal)', e);
+  }
+
+  startSessionHeartbeat();
+}
+
+// يُنهي الجلسة الحالية فوراً على هذا الجهاز لأن جهازاً آخر أصبح هو
+// الجلسة النشطة (اكتُشف عبر Realtime أو الفحص الدوري).
+async function forceKickCurrentSession(otherDeviceLabel) {
+  if (sessionKicked) return;
+  sessionKicked = true;
+  stopSessionHeartbeat();
+  try { await sb.auth.signOut(); } catch {}
+  State.user = null; State.session = null;
+  unsubscribeAll();
+  _mbTop = null;
+  $('#appShell').classList.add('hidden');
+  $('#loginPage').classList.remove('hidden');
+  modal({
+    title: 'تم تسجيل الخروج',
+    body: `<p>تم تسجيل الدخول إلى حسابك من جهاز آخر${otherDeviceLabel ? ' ('+escapeHtml(otherDeviceLabel)+')' : ''}، لذلك تم إنهاء الجلسة على هذا الجهاز تلقائياً.</p>
+           <p class="muted">يسمح النظام بجلسة واحدة نشطة فقط لكل حساب طالب في نفس الوقت. يمكنك تسجيل الدخول مرة أخرى في أي وقت.</p>`,
+    footer: `<button class="btn btn-primary" data-close>حسناً</button>`
+  });
+}
+
+// شبكة أمان احتياطية في حال انقطع اتصال Realtime: فحص دوري كل 25
+// ثانية للتأكد أن هذا الجهاز ما زال هو صاحب الجلسة النشطة.
+let sessionHeartbeatTimer = null;
+function startSessionHeartbeat() {
+  stopSessionHeartbeat();
+  sessionHeartbeatTimer = setInterval(async () => {
+    if (!State.user || State.user.role === 'admin' || sessionKicked) return;
+    try {
+      const { data, error } = await sb.rpc('is_my_session_active', { p_device_id: DEVICE_ID });
+      if (!error && data === false) await forceKickCurrentSession(null);
+    } catch { /* تجاهل الأخطاء المؤقتة (انقطاع شبكة، إلخ) */ }
+  }, 25000);
+}
+function stopSessionHeartbeat() {
+  if (sessionHeartbeatTimer) { clearInterval(sessionHeartbeatTimer); sessionHeartbeatTimer = null; }
 }
 
 async function loadProfile(uid) {
@@ -192,6 +381,7 @@ async function afterLogin() {
   $('#userAvatar').textContent = State.user.avatar || State.user.name[0];
   $$('.admin-only').forEach(el => el.style.display = State.user.role === 'admin' ? '' : 'none');
   applyTheme();
+  await enforceSingleDeviceSession();
   await Promise.all([
     loadRooms(), loadCourses(), loadPaths(), loadProfiles(),
     loadEnrollments(), loadNotifications(), loadActiveLive(),
@@ -310,17 +500,35 @@ function subscribeGlobal() {
     .on('postgres_changes', { event:'*', schema:'public', table:'courses' }, async () => { await loadCourses(); if(['courses','dashboard','manageCourses'].includes(State.view)) refresh(); })
     .on('postgres_changes', { event:'*', schema:'public', table:'lessons' }, async () => { await loadCourses(); if(['courses','dashboard','manageCourses'].includes(State.view)) refresh(); })
     .subscribe());
+  // enrollments (access control) — يحدّث فوراً عند تسجيل/إلغاء تسجيل الأدمن لطالب
+  channels.push(sb.channel('rt:enrollments')
+    .on('postgres_changes', { event:'*', schema:'public', table:'enrollments' }, async () => {
+      await loadEnrollments();
+      if (['courses','paths','course','dashboard','students'].includes(State.view)) refresh();
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'path_enrollments' }, async () => {
+      await loadEnrollments();
+      if (['courses','paths','course','dashboard','students'].includes(State.view)) refresh();
+    })
+    .subscribe());
   // live streams
   channels.push(sb.channel('rt:live')
     .on('postgres_changes', { event:'*', schema:'public', table:'live_streams' }, async () => { await loadActiveLive(); if(State.view==='live') renderLive(); })
     .subscribe());
-  // profiles (online status)
+  // profiles (online status + مراقبة جلسة الجهاز الواحد)
   channels.push(sb.channel('rt:profiles')
     .on('postgres_changes', { event:'UPDATE', schema:'public', table:'profiles' }, async (p) => {
       const i = State.profiles.findIndex(x=>x.id===p.new.id);
       if (i>=0) State.profiles[i] = p.new;
       if (State.view==='chat') renderChatMessages();
       if (State.view==='students') renderStudents();
+      // جهاز آخر أصبح هو الجلسة النشطة لهذا الحساب؟ سجّل الخروج فوراً من هنا.
+      if (State.user && p.new.id === State.user.id && State.user.role !== 'admin') {
+        State.user = p.new;
+        if (p.new.active_session_id && p.new.active_session_id !== DEVICE_ID) {
+          await forceKickCurrentSession(p.new.active_device_label);
+        }
+      }
     })
     .subscribe());
 }
@@ -433,13 +641,62 @@ function applyTheme() {
   });
 }
 
+/* ============== Mobile Back Button / Swipe-Back Bridge ==============
+ * هذا المشروع صفحة واحدة (SPA) تستبدل محتوى #viewWrap مكانه، فبدون هذا
+ * الجسر لا يكون لدى المتصفح أي history يتراجع فيه، وبالتالي زر الرجوع في
+ * الهاتف (أو Swipe Back) يُغلق المنصة بدل الرجوع لصفحة سابقة داخلها.
+ * الفكرة: كل شاشة حقيقية يفتحها الطالب (تبويب، صفحة كورس، صفحة اختبار...)
+ * تسجَّل كخطوة history واحدة. عند الضغط على رجوع الهاتف:
+ *   1) لو فيه Modal مفتوح أو القائمة الجانبية (موبايل) مفتوحة تُغلق أولاً.
+ *   2) لو الشاشة الحالية عندها زر "رجوع" داخلي، يُضغط هو بالضبط — فتُنفَّذ
+ *      نفس منطقه الأصلي حرفياً (بما في ذلك تأكيد الخروج من اختبار لم يُسلَّم
+ *      بعد)، فلا يتأثر أي اختبار أو وظيفة أخرى.
+ *   3) غير كده (تنقل بين التبويبات الرئيسية) تُعرض الشاشة السابقة مباشرة.
+ * زر "رجوع" الموجود داخل المنصة لم يُعدَّل ولا سطر واحد فيه.
+ */
+let _mbTop = null; // {screen, params, sig} لآخر خطوة سجّلناها
+function _mbSig(screen, params) { return screen + '|' + JSON.stringify(params || {}); }
+function mbGo(screen, params) {
+  const sig = _mbSig(screen, params);
+  const entry = { maqlama:true, screen, params };
+  try {
+    if (_mbTop && _mbTop.sig === sig) history.replaceState(entry, '');
+    else history.pushState(entry, '');
+  } catch(e) {}
+  _mbTop = { screen, params, sig };
+}
+function initMobileBack() {
+  window.addEventListener('popstate', (e) => {
+    const st = e.state;
+    if (!st || !st.maqlama) return; // وصلنا لما قبل تسجيلاتنا — نترك المتصفح يتصرف بشكل طبيعي (خروج فعلي)
+    if (!State.user) return;        // بعد تسجيل الخروج/قبل الدخول: لا شيء آمن لإعادة عرضه
+    _mbTop = { screen: st.screen, params: st.params, sig: _mbSig(st.screen, st.params) };
+    if ($('#modalRoot') && $('#modalRoot').innerHTML.trim()) $('#modalRoot').innerHTML = '';
+    const sidebar = $('#sidebar');
+    if (sidebar && sidebar.classList.contains('open')) { sidebar.classList.remove('open'); toggleBackdrop(); }
+    const backBtn = $('#back');
+    if (backBtn) { backBtn.click(); return; }
+    switch (st.screen) {
+      case 'tab': navigate(st.params.view); break;
+      case 'course': openCourse(st.params.id); break;
+      case 'quizResult': openQuizResultView(st.params.quizId, st.params.courseId); break;
+      case 'manageQuizQuestions': openManageQuizQuestions(st.params.quizId); break;
+      case 'quizResults': openQuizResults(st.params.quizId); break;
+      case 'quizTake': openCourse(st.params.courseId); break; // لا نعيد بدء اختبار محسوب بالوقت من الـ history أبداً
+      default: break;
+    }
+  });
+}
+
 /* ============== Navigation ============== */
 function navigate(view) {
+  clearQuizTimers();
   State.view = view;
   $$('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view===view));
   const wrap = $('#viewWrap'); wrap.innerHTML = '';
   const adminOnly = ['students','manageCourses','managePaths','manageQuizzes'];
   if (adminOnly.includes(view) && State.user.role !== 'admin') { toast('غير مصرح','للمدير فقط','warning'); return navigate('dashboard'); }
+  mbGo('tab', { view });
   switch(view){
     case 'dashboard': renderDashboard(); break;
     case 'courses':   renderCoursesView(); break;
@@ -456,6 +713,7 @@ function navigate(view) {
 }
 
 /* ============== Helpers (per-user filtering) ============== */
+// كورسات/مسارات الطالب المسجَّل فيها فعلياً (تُستخدم في "كورساتي" بالرئيسية والملف الشخصي)
 function visibleCourses() {
   if (State.user.role === 'admin') return State.courses;
   const ids = new Set(State.enrollments.map(e=>e.course_id));
@@ -467,12 +725,48 @@ function visiblePaths() {
   const pathIds = new Set(State.pathEnrollments.map(e=>e.path_id));
   return State.paths.filter(p => pathIds.has(p.id));
 }
+// كل الكورسات/المسارات الموجودة في المنصة، لعرضها كـ"كتالوج" يتصفّحه أي طالب
+// (السماح بالتصفّح فقط — فتح المحتوى الفعلي يبقى محكوماً بصلاحيات RLS الحقيقية)
+function catalogCourses(){ return State.courses; }
+function catalogPaths(){ return State.paths; }
+// هل الطالب مسجَّل فعلياً في هذا الكورس (مباشرة أو عبر مسار مسجَّل فيه)؟
+function isEnrolledInCourse(c) {
+  if (!c) return false;
+  if (State.user.role === 'admin') return true;
+  const inCourse = State.enrollments.some(e => e.course_id === c.id);
+  const inPath = c.path_id && State.pathEnrollments.some(e => e.path_id === c.path_id);
+  return inCourse || inPath;
+}
+function isEnrolledInPath(p) {
+  if (!p) return false;
+  if (State.user.role === 'admin') return true;
+  return State.pathEnrollments.some(e => e.path_id === p.id);
+}
 function lessonsOf(courseId){ return State.lessons.filter(l=>l.course_id===courseId); }
 function profileOf(uid){ return State.profiles.find(p=>p.id===uid); }
 
+// يجلب حالة "أونلاين" لمُعرِّفات مستخدمين محدَّدين فقط (مثلاً مرسلو رسائل
+// ظاهرة في الشات)، عبر دالة قاعدة بيانات ضيّقة النطاق (chat_presence) بدل
+// تحميل كل البروفايلات دفعة واحدة — هذا لا يكشف أي بيانات أخرى (لا بريد، لا
+// اسم مستخدم، لا دور) ولا يسمح بحصر/عدّ كل المستخدمين على المنصة.
+async function refreshPresence(ids) {
+  const missing = [...new Set(ids)].filter(id => id && !(id in State.presence));
+  if (!missing.length) return false;
+  try {
+    const { data, error } = await sb.rpc('chat_presence', { p_ids: missing });
+    if (error) throw error;
+    (data || []).forEach(r => { State.presence[r.id] = !!r.online; });
+    return true;
+  } catch (e) { console.error(e); return false; }
+}
+
 /* ============== Views: Dashboard ============== */
 function renderDashboard() {
-  const studentsCount = State.profiles.filter(p=>p.role==='student').length;
+  const isAdmin = State.user.role === 'admin';
+  // عدد الطلاب: يُحسب ويُعرض للأدمن فقط. الطالب لا يملك أصلاً وصولاً على
+  // مستوى القاعدة (RLS) لأي بروفايل غير بروفايله، فهذه القيمة تكون 0
+  // بالنسبة له دائماً — البطاقة نفسها تُخفى بالكامل من واجهته أدناه.
+  const studentsCount = isAdmin ? State.profiles.filter(p=>p.role==='student').length : 0;
   const lessonsCount = State.lessons.length;
   const my = visibleCourses().slice(0,6);
   $('#viewWrap').innerHTML = `
@@ -481,7 +775,7 @@ function renderDashboard() {
     </div>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-ic"><i class="fas fa-book"></i></div><div><div class="stat-val">${State.courses.length}</div><div class="stat-lbl">الكورسات</div></div></div>
-      <div class="stat-card"><div class="stat-ic"><i class="fas fa-user-graduate"></i></div><div><div class="stat-val">${studentsCount}</div><div class="stat-lbl">الطلاب</div></div></div>
+      ${isAdmin?`<div class="stat-card"><div class="stat-ic"><i class="fas fa-user-graduate"></i></div><div><div class="stat-val">${studentsCount}</div><div class="stat-lbl">الطلاب</div></div></div>`:''}
       <div class="stat-card"><div class="stat-ic"><i class="fas fa-video"></i></div><div><div class="stat-val">${lessonsCount}</div><div class="stat-lbl">المحاضرات</div></div></div>
       <div class="stat-card"><div class="stat-ic"><i class="fas fa-route"></i></div><div><div class="stat-val">${State.paths.length}</div><div class="stat-lbl">المسارات</div></div></div>
     </div>
@@ -495,13 +789,13 @@ function renderDashboard() {
 
 /* ============== Views: Courses ============== */
 function renderCoursesView(q='') {
-  let list = visibleCourses();
+  let list = catalogCourses();
   if (q) {
     const s = q.trim().toLowerCase();
     list = list.filter(c => (c.title+' '+c.category+' '+(c.description||'')).toLowerCase().includes(s));
   }
   $('#viewWrap').innerHTML = `
-    <div class="page-head"><div><h1>الكورسات</h1><p>تصفّح الكورسات المتاحة لك.</p></div></div>
+    <div class="page-head"><div><h1>الكورسات</h1><p>تصفّح كل الكورسات المتاحة على المنصة. الكورسات المقفلة تحتاج تسجيلاً من الإدارة لفتح محتواها.</p></div></div>
     <div class="course-grid" id="allCourses"></div>`;
   renderCourseGrid('#allCourses', list);
 }
@@ -509,11 +803,14 @@ function renderCoursesView(q='') {
 function renderCourseGrid(sel, list) {
   const el = $(sel); if (!el) return;
   if (!list.length) { el.outerHTML = `<div class="empty"><i class="fas fa-folder-open"></i><p>لا توجد كورسات.</p></div>`; return; }
-  el.innerHTML = list.map(c => `
-    <div class="course-card" data-id="${c.id}">
+  el.innerHTML = list.map(c => {
+    const locked = State.user.role !== 'admin' && !isEnrolledInCourse(c);
+    return `
+    <div class="course-card ${locked?'is-locked':''}" data-id="${c.id}">
       <div class="course-thumb" style="background:${c.cover_image ? `url('${escapeHtml(c.cover_image)}') center/cover no-repeat` : c.color}">
         ${c.cover_image ? '' : `<i class="fas ${c.icon}"></i>`}
         <span class="badge-cat">${escapeHtml(c.category||'')}</span>
+        ${locked ? `<span class="badge-lock" title="غير مسجَّل"><i class="fas fa-lock"></i></span>` : ''}
       </div>
       <div class="course-body">
         <h4>${escapeHtml(c.title)}</h4>
@@ -523,41 +820,82 @@ function renderCourseGrid(sel, list) {
           <span><i class="fas fa-clock"></i> ${escapeHtml(c.duration||'—')}</span>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   el.addEventListener('click', e => {
     const card = e.target.closest('.course-card'); if (card) openCourse(card.dataset.id);
   });
 }
 
+/* ---- Accordion sections on the course detail page ---- */
+function accordionSection({ key, icon, title, count, bodyHtml, openByDefault=false }) {
+  return `
+    <div class="section acc ${openByDefault?'open':''}" data-acc-key="${key}">
+      <div class="section-head acc-head" data-acc-toggle="${key}">
+        <h3><i class="fas ${icon}"></i> ${escapeHtml(title)} <span class="acc-count">(${count})</span></h3>
+        <i class="fas fa-chevron-down acc-chevron"></i>
+      </div>
+      <div class="acc-body">${bodyHtml}</div>
+    </div>`;
+}
+function initAccordions(root=document) {
+  root.querySelectorAll('[data-acc-toggle]').forEach(head => {
+    head.addEventListener('click', () => {
+      head.closest('.acc').classList.toggle('open');
+    });
+  });
+}
+
 async function openCourse(id) {
-  const c = State.courses.find(x=>x.id===id); if (!c) return;
-  if (State.user.role !== 'admin' && !visibleCourses().some(x=>x.id===id)) { toast('غير مصرح','الكورس غير متاح لك','warning'); return; }
+  const c = State.courses.find(x=>x.id===id);
+  if (!c) { toast('غير موجود','هذا الكورس غير موجود','warning'); return; }
+  const enrolled = isEnrolledInCourse(c);
+  const isAdmin = State.user.role === 'admin';
+
+  // المحتوى الفعلي (المحاضرات/الاختبارات) يأتي من الخادم أساساً حسب صلاحيات RLS
+  // الحقيقية؛ لو الطالب غير مسجَّل ستكون هذه المصفوفات فارغة تلقائياً من الباك-إند.
   const lessons = lessonsOf(id);
-  const lessonsHtml = lessons.length ? `
-    <div class="lesson-list">${lessons.map(l => `
+  const videos  = lessons.filter(l => l.type === 'video');
+  const records = lessons.filter(l => l.type === 'record');
+  const papers  = lessons.filter(l => l.type === 'pdf' || l.type === 'image' || l.type === 'file');
+  const courseQuizzes = State.quizzes.filter(z=>z.course_id===id);
+
+  const lessonRow = (l) => `
       <div class="lesson-item" data-lid="${l.id}">
-        <div class="lesson-ic"><i class="fas ${l.type==='pdf'?'fa-file-pdf':l.type==='image'?'fa-image':l.type==='file'?'fa-paperclip':'fa-play'}"></i></div>
-        <div class="lesson-info"><strong>${escapeHtml(l.title)}</strong><small>${l.type} • ${escapeHtml(l.duration||'')}</small></div>
+        <div class="lesson-ic"><i class="fas ${l.type==='pdf'?'fa-file-pdf':l.type==='image'?'fa-image':l.type==='record'?'fa-clapperboard':l.type==='file'?'fa-paperclip':'fa-play'}"></i></div>
+        <div class="lesson-info"><strong>${escapeHtml(l.title)}</strong><small>${escapeHtml(l.duration||'')}</small></div>
         <div class="lesson-act">
           <button class="btn btn-ghost btn-sm" data-open><i class="fas fa-${l.type==='pdf'?'eye':'play'}"></i> فتح</button>
-          ${State.user.role==='admin'?`<button class="icon-btn" data-del-lesson="${l.id}" style="color:var(--danger)"><i class="fas fa-trash"></i></button>`:''}
+          ${isAdmin?`<button class="icon-btn" data-del-lesson="${l.id}" style="color:var(--danger)"><i class="fas fa-trash"></i></button>`:''}
         </div>
-      </div>`).join('')}</div>`
-    : `<div class="empty"><i class="fas fa-circle-info"></i><p>لا توجد محاضرات بعد.</p></div>`;
-  const adminActions = State.user.role==='admin' ? `<button class="btn btn-primary btn-sm" id="addLesson"><i class="fas fa-plus"></i> إضافة محاضرة</button>` : '';
-  const courseQuizzes = State.quizzes.filter(z=>z.course_id===id);
+      </div>`;
+  const listOrEmpty = (arr, emptyMsg) => arr.length
+    ? `<div class="lesson-list">${arr.map(lessonRow).join('')}</div>`
+    : `<div class="empty"><i class="fas fa-circle-info"></i><p>${emptyMsg}</p></div>`;
+
+  const lockedNotice = !enrolled && !isAdmin
+    ? `<div class="locked-banner"><i class="fas fa-lock"></i>
+        <div><strong>هذا الكورس غير متاح لك بعد.</strong>
+        <p>تواصل مع إدارة المنصة لتسجيلك في هذا الكورس، وسيظهر لك محتواه فور تسجيلك.</p></div>
+      </div>`
+    : '';
+
+  const adminActions = isAdmin ? `<button class="btn btn-primary btn-sm" id="addLesson"><i class="fas fa-plus"></i> إضافة محتوى</button>` : '';
+
   const quizzesHtml = courseQuizzes.length ? `
     <div class="lesson-list">${courseQuizzes.map(z=>{
       const mine = State.myQuizAttempts.find(a=>a.quiz_id===z.id);
       const pct = mine && mine.max_score ? Math.round((mine.score/mine.max_score)*100) : null;
+      const durationNote = `المدة: ${z.duration_minutes ?? 10} دقيقة`;
+      const statusNote = mine ? `تم الأداء — النتيجة: ${mine.score}/${mine.max_score} (${pct}%)` : 'لم يتم الأداء بعد';
       return `<div class="lesson-item" data-quiz-item="${z.id}">
         <div class="lesson-ic"><i class="fas fa-file-circle-question"></i></div>
         <div class="lesson-info">
           <strong>${escapeHtml(z.title)}</strong>
-          <small>${z.description ? escapeHtml(z.description) : (mine ? `تم الأداء — النتيجة: ${mine.score}/${mine.max_score} (${pct}%)` : 'لم يتم الأداء بعد')}</small>
+          <small>${z.description ? escapeHtml(z.description)+' • ' : ''}${durationNote} • ${statusNote}</small>
         </div>
         <div class="lesson-act">
-          ${State.user.role==='admin'
+          ${isAdmin
             ? `<button class="btn btn-ghost btn-sm" data-manage-quiz="${z.id}"><i class="fas fa-gear"></i> إدارة</button>`
             : mine
               ? `<button class="btn btn-ghost btn-sm" data-view-result="${z.id}"><i class="fas fa-eye"></i> عرض النتيجة</button>`
@@ -565,6 +903,8 @@ async function openCourse(id) {
         </div>
       </div>`;
     }).join('')}</div>` : `<div class="empty"><i class="fas fa-circle-info"></i><p>لا توجد اختبارات لهذا الكورس بعد.</p></div>`;
+
+  mbGo('course', { id });
   $('#viewWrap').innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back"><i class="fas fa-arrow-right"></i> رجوع</button>
     <div class="section" style="margin-top:16px">
@@ -581,15 +921,15 @@ async function openCourse(id) {
         </div>
       </div>
     </div>
-    <div class="section">
-      <div class="section-head"><h3>المحاضرات والملفات</h3>${adminActions}</div>
-      ${lessonsHtml}
-    </div>
-    <div class="section">
-      <div class="section-head"><h3>الاختبارات</h3></div>
-      ${quizzesHtml}
-    </div>`;
+    ${lockedNotice}
+    ${isAdmin ? `<div style="margin-bottom:16px;display:flex;justify-content:flex-end">${adminActions}</div>` : ''}
+    ${accordionSection({ key:'videos',  icon:'fa-play-circle',        title:'الفيديوهات',            count:videos.length,  bodyHtml:listOrEmpty(videos,'لا توجد فيديوهات بعد.'), openByDefault:true })}
+    ${accordionSection({ key:'records', icon:'fa-clapperboard',       title:'الريكوردات',             count:records.length, bodyHtml:listOrEmpty(records,'لا توجد ريكوردات بعد.') })}
+    ${accordionSection({ key:'papers',  icon:'fa-file-lines',         title:'ورق محاضرات الكورس',     count:papers.length,  bodyHtml:listOrEmpty(papers,'لا توجد ملفات/أوراق محاضرات بعد.') })}
+    ${accordionSection({ key:'quizzes', icon:'fa-file-circle-question', title:'الاختبارات الإلكترونية', count:courseQuizzes.length, bodyHtml:quizzesHtml })}
+  `;
   $('#back').addEventListener('click', ()=>navigate('courses'));
+  initAccordions($('#viewWrap'));
   if ($('#addLesson')) $('#addLesson').addEventListener('click', ()=>openAddLessonModal(c.id));
   $$('.lesson-item[data-lid]').forEach(it => {
     it.addEventListener('click', (e) => {
@@ -599,10 +939,13 @@ async function openCourse(id) {
   });
   $$('[data-del-lesson]').forEach(b => b.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (!confirm('حذف هذه المحاضرة؟')) return;
+    if (!confirm('حذف هذا المحتوى؟')) return;
     const lid = b.dataset.delLesson;
     const lesson = lessons.find(x=>x.id===lid);
-    if (lesson?.storage_path) { try { await sb.storage.from(BUCKET).remove([lesson.storage_path]); } catch{} }
+    if (lesson?.storage_path) {
+      try { await sb.storage.from(LESSON_BUCKET).remove([lesson.storage_path]); } catch{}
+      try { await sb.storage.from(BUCKET).remove([lesson.storage_path]); } catch{} // توافق مع ملفات قديمة رُفعت قبل هذا التحديث
+    }
     await sb.from('lessons').delete().eq('id', lid);
     await loadCourses(); openCourse(id);
   }));
@@ -624,8 +967,30 @@ async function openCourse(id) {
 // }
 
 
-function playLesson(l) {
-  const url = l.url || '';
+async function resolveLessonUrl(l) {
+  // ملف مرفوع فعلياً في الـ storage الخاص بالمحاضرات → لازم رابط موقّع (signed)
+  // يُصدره الخادم بعد التحقق من صلاحية المستخدم (تسجيل حقيقي)، وليس رابطاً عاماً ثابتاً.
+  if (l.storage_path) {
+    try {
+      const { data, error } = await sb.storage.from(LESSON_BUCKET).createSignedUrl(l.storage_path, 3600);
+      if (error) throw error;
+      if (data?.signedUrl) return data.signedUrl;
+    } catch (e) {
+      // توافق مع محتوى قديم رُفع قبل هذا التحديث إلى الـ bucket العام القديم
+      try {
+        const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(l.storage_path);
+        if (pub?.publicUrl) return pub.publicUrl;
+      } catch {}
+      toast('تعذّر فتح الملف','ليست لديك صلاحية للوصول لهذا المحتوى','error');
+      return '';
+    }
+  }
+  // رابط خارجي أدخله الأدمن يدوياً (يوتيوب/فيميو...الخ)
+  return l.url || '';
+}
+
+async function playLesson(l) {
+  const url = await resolveLessonUrl(l);
 
   let body = `<div class="empty">
     <i class="fas fa-circle-info"></i>
@@ -634,8 +999,8 @@ function playLesson(l) {
 
   if (url) {
 
-    // تشغيل الفيديو
-    if (l.type === 'video') {
+    // تشغيل الفيديو (فيديو عادي أو ريكورد)
+    if (l.type === 'video' || l.type === 'record') {
 
 
       // الجزء ده شغتا بس حولته لتعليق
@@ -725,17 +1090,52 @@ function playLesson(l) {
 
 
 
-/* ============== Student: taking a quiz ============== */
+/* ============== Student: taking a quiz (timed) ============== */
+let quizTimerHandle = null;   // countdown setInterval
+let quizAutosaveHandle = null; // autosave setInterval
+let quizBeforeUnloadHandler = null;
+
+function clearQuizTimers() {
+  if (quizTimerHandle) { clearInterval(quizTimerHandle); quizTimerHandle = null; }
+  if (quizAutosaveHandle) { clearInterval(quizAutosaveHandle); quizAutosaveHandle = null; }
+  if (quizBeforeUnloadHandler) { window.removeEventListener('beforeunload', quizBeforeUnloadHandler); quizBeforeUnloadHandler = null; }
+}
+
 async function openQuizTake(quizId, courseId) {
+  clearQuizTimers();
   const z = State.quizzes.find(x=>x.id===quizId); if (!z) return;
   if (State.myQuizAttempts.some(a=>a.quiz_id===quizId)) { toast('تم الأداء من قبل','','info'); return openQuizResultView(quizId, courseId); }
+
+  // Server decides start time / deadline — never trust the browser clock.
+  let session;
+  try {
+    const { data, error: rpcError } = await sb.rpc('start_quiz_attempt', { p_quiz_id: quizId });
+    if (rpcError) throw rpcError;
+    session = data;
+  } catch(err) {
+    console.error(err);
+    toast('تعذّر بدء الاختبار', err.message || 'حدث خطأ', 'error');
+    await loadMyQuizAttempts();
+    if (State.myQuizAttempts.some(a=>a.quiz_id===quizId)) return openQuizResultView(quizId, courseId);
+    return openCourse(courseId);
+  }
+
   const { data: questions, error } = await sb.from('quiz_questions_public').select('*').eq('quiz_id', quizId).order('position').order('created_at');
   if (error) { toast('فشل تحميل الأسئلة', error.message, 'error'); return; }
   if (!questions.length) { toast('لا توجد أسئلة في هذا الاختبار بعد','','warning'); return; }
+
+  // clock offset so the countdown tracks the SERVER's deadline, not the client's clock
+  const clockOffsetMs = new Date(session.server_now).getTime() - Date.now();
+  const deadlineMs = new Date(session.deadline).getTime();
+
+  mbGo('quizTake', { quizId, courseId });
   $('#viewWrap').innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back"><i class="fas fa-arrow-right"></i> رجوع للكورس</button>
     <div class="section" style="margin-top:16px">
-      <div class="section-head"><h3>${escapeHtml(z.title)}</h3></div>
+      <div class="section-head">
+        <h3>${escapeHtml(z.title)}</h3>
+        <div class="tag" id="quizTimer" style="font-weight:700;font-size:15px"><i class="fas fa-clock"></i> <span id="quizTimerText">--:--</span></div>
+      </div>
       ${z.description?`<p class="muted" style="margin-bottom:14px">${escapeHtml(z.description)}</p>`:''}
       <form id="quizForm" class="form">
         ${questions.map((q,i)=>`
@@ -752,43 +1152,86 @@ async function openQuizTake(quizId, courseId) {
         <button type="submit" class="btn btn-primary btn-block"><i class="fas fa-paper-plane"></i> إرسال الاختبار</button>
       </form>
     </div>`;
-  $('#back').addEventListener('click', ()=>openCourse(courseId));
-  $('#quizForm').addEventListener('submit', async (e)=>{
-    e.preventDefault();
+
+  const collectAnswers = () => {
     const answers = {};
     questions.forEach(q => { const sel = $(`input[name="q_${q.id}"]:checked`); if (sel) answers[q.id] = sel.value; });
-    const btn = e.target.querySelector('button[type=submit]');
-    btn.disabled = true; const old = btn.innerHTML; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ الإرسال...';
+    return answers;
+  };
+
+  let submitted = false;
+  const doSubmit = async (auto=false) => {
+    if (submitted) return;
+    submitted = true;
+    clearQuizTimers();
+    const answers = collectAnswers();
+    const form = $('#quizForm');
+    const btn = form ? form.querySelector('button[type=submit]') : null;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ الإرسال...'; }
+    if (form) $$('input', form).forEach(inp => inp.disabled = true);
     try {
       const { data, error: rpcError } = await sb.rpc('submit_quiz_attempt', { p_quiz_id: quizId, p_answers: answers });
       if (rpcError) throw rpcError;
-      toast('تم التسليم','تم تصحيح الاختبار تلقائياً','success');
+      toast(auto ? 'انتهى الوقت' : 'تم التسليم', 'تم تصحيح الاختبار تلقائياً','success');
       await loadMyQuizAttempts();
       openQuizResultView(quizId, courseId, data);
     } catch(err) {
       console.error(err);
       toast('فشل الإرسال', err.message || 'حدث خطأ', 'error');
-      btn.disabled = false; btn.innerHTML = old;
+      submitted = false;
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> إرسال الاختبار'; }
+      if (form) $$('input', form).forEach(inp => inp.disabled = false);
     }
+  };
+
+  const timerText = $('#quizTimerText');
+  const timerChip = $('#quizTimer');
+  const tick = () => {
+    const remaining = deadlineMs - (Date.now() + clockOffsetMs);
+    if (timerText) timerText.textContent = fmtCountdown(remaining);
+    if (timerChip) timerChip.style.color = remaining <= 60000 ? 'var(--danger)' : '';
+    if (remaining <= 0) { doSubmit(true); }
+  };
+  tick();
+  quizTimerHandle = setInterval(tick, 1000);
+
+  // best-effort autosave of in-progress answers, for crash recovery only
+  quizAutosaveHandle = setInterval(() => {
+    if (submitted) return;
+    sb.rpc('save_quiz_progress', { p_quiz_id: quizId, p_answers: collectAnswers() }).catch(()=>{});
+  }, 15000);
+
+  quizBeforeUnloadHandler = (e) => { if (!submitted) { e.preventDefault(); e.returnValue=''; } };
+  window.addEventListener('beforeunload', quizBeforeUnloadHandler);
+
+  $('#back').addEventListener('click', ()=>{
+    if (!submitted && !confirm('لم تقم بتسليم الاختبار بعد. الوقت سيستمر في العد أثناء غيابك، وسيتم التسليم تلقائياً عند انتهائه. هل تريد الخروج الآن؟')) return;
+    clearQuizTimers();
+    openCourse(courseId);
   });
+  $('#quizForm').addEventListener('submit', (e)=>{ e.preventDefault(); doSubmit(false); });
 }
 
 async function openQuizResultView(quizId, courseId, freshResult) {
+  clearQuizTimers();
   const z = State.quizzes.find(x=>x.id===quizId); if (!z) return;
   const attempt = State.myQuizAttempts.find(a=>a.quiz_id===quizId);
   if (!attempt && !freshResult) { toast('لا توجد نتيجة لهذا الاختبار','','warning'); return; }
   const score = freshResult?.score ?? attempt.score;
   const max = freshResult?.max_score ?? attempt.max_score;
   const breakdown = freshResult?.breakdown ?? attempt.breakdown ?? [];
+  const status = freshResult?.status ?? attempt?.status ?? 'submitted';
   const pct = max ? Math.round((score/max)*100) : 0;
   const { data: questions } = await sb.from('quiz_questions_public').select('*').eq('quiz_id', quizId).order('position').order('created_at');
   const qList = questions || [];
+  mbGo('quizResult', { quizId, courseId });
   $('#viewWrap').innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back"><i class="fas fa-arrow-right"></i> رجوع للكورس</button>
     <div class="section" style="margin-top:16px;text-align:center">
       <div class="stat-ic" style="margin:0 auto 12px"><i class="fas fa-award"></i></div>
       <h1>${escapeHtml(z.title)}</h1>
       <p class="muted">نتيجتك: <strong style="color:var(--text)">${score} / ${max}</strong> (${pct}%)</p>
+      ${status==='auto_submitted' ? `<p class="muted"><i class="fas fa-clock"></i> تم التسليم تلقائياً عند انتهاء الوقت</p>` : ''}
     </div>
     <div class="section">
       <div class="lesson-list">${qList.map((q,i)=>{
@@ -813,22 +1256,35 @@ async function uploadFile(file, folder='uploads') {
   return { url: data.publicUrl, path, name: file.name, type: file.type, size: file.size };
 }
 
+// رفع محتوى محاضرة (فيديو/ريكورد/ملف) إلى الـ bucket الخاص المحمي بصلاحيات RLS
+// حقيقية — لا يُنتج رابطاً عاماً؛ يتم توليد رابط موقّت موقّع فقط لمن يملك صلاحية.
+async function uploadLessonFile(file, courseId) {
+  const safe = file.name.replace(/[^\w.\-]/g,'_');
+  const path = `lessons/${courseId}/${Date.now()}_${safe}`;
+  const { error } = await sb.storage.from(LESSON_BUCKET).upload(path, file, { upsert:false, contentType: file.type });
+  if (error) throw error;
+  return { path, name: file.name, type: file.type, size: file.size };
+}
+
 function openAddLessonModal(courseId) {
   const body = `<div class="form">
-    <div class="field"><label>عنوان المحاضرة</label><input id="lTitle" placeholder="مثال: مقدمة في..." /></div>
+    <div class="field"><label>العنوان</label><input id="lTitle" placeholder="مثال: مقدمة في..." /></div>
     <div class="field"><label>النوع</label>
       <select id="lType">
-        <option value="video">فيديو</option><option value="pdf">PDF</option>
-        <option value="image">صورة</option><option value="file">ملف</option>
+        <option value="video">فيديو</option>
+        <option value="record">ريكورد (تسجيل محاضرة)</option>
+        <option value="pdf">ورق محاضرات (PDF)</option>
+        <option value="image">صورة</option>
+        <option value="file">ملف آخر</option>
       </select>
     </div>
     <div class="field"><label>المدة (اختياري)</label><input id="lDur" placeholder="15 د" /></div>
     <div class="field"><label>رفع الملف</label><input id="lFile" type="file" /></div>
-    <div class="field"><label>أو رابط خارجي</label><input id="lUrl" placeholder="https://..." /></div>
+    <div class="field"><label>أو رابط خارجي (مثال: يوتيوب)</label><input id="lUrl" placeholder="https://..." /></div>
     <div class="upload-progress" id="lProg" style="display:none"><div></div></div>
   </div>`;
   const footer = `<button class="btn btn-ghost" data-close>إلغاء</button><button class="btn btn-primary" id="saveLesson"><i class="fas fa-save"></i> حفظ</button>`;
-  const m = modal({ title:'إضافة محاضرة', body, footer });
+  const m = modal({ title:'إضافة محتوى للكورس', body, footer });
   m.root.querySelector('[data-close]').addEventListener('click', m.close);
   m.root.querySelector('#saveLesson').addEventListener('click', async () => {
     const title = m.root.querySelector('#lTitle').value.trim();
@@ -837,15 +1293,15 @@ function openAddLessonModal(courseId) {
     const file = m.root.querySelector('#lFile').files[0];
     const urlIn = m.root.querySelector('#lUrl').value.trim();
     if (!title) return toast('عنوان مطلوب','','warning');
-    let url = urlIn, storage_path = null;
+    let url = urlIn || null, storage_path = null;
     if (file) {
       const prog = m.root.querySelector('#lProg'); prog.style.display=''; prog.firstElementChild.style.width='30%';
-      try { const r = await uploadFile(file, 'lessons'); url = r.url; storage_path = r.path; prog.firstElementChild.style.width='100%'; }
+      try { const r = await uploadLessonFile(file, courseId); storage_path = r.path; url = null; prog.firstElementChild.style.width='100%'; }
       catch(e){ console.error(e); return toast('فشل الرفع', e.message,'error'); }
     }
     const { error } = await sb.from('lessons').insert({ course_id: courseId, title, type, duration: dur||null, url, storage_path });
     if (error) return toast('فشل الحفظ', error.message,'error');
-    await sb.from('notifications').insert({ user_id: null, title:'محاضرة جديدة', body:`أُضيفت "${title}"`, icon:'fa-plus' });
+    await sb.from('notifications').insert({ user_id: null, title:'محتوى جديد', body:`أُضيف "${title}"`, icon:'fa-plus' });
     toast('تم الحفظ','','success'); m.close();
     await loadCourses(); openCourse(courseId);
   });
@@ -853,16 +1309,20 @@ function openAddLessonModal(courseId) {
 
 /* ============== Views: Paths ============== */
 function renderPaths(){
-  const list = visiblePaths();
+  const list = catalogPaths();
   $('#viewWrap').innerHTML = `
-    <div class="page-head"><div><h1>المسارات التعليمية</h1><p>المسارات التي تم تخصيصها لك.</p></div></div>
+    <div class="page-head"><div><h1>المسارات التعليمية</h1><p>تصفّح كل المسارات المتاحة على المنصة. المسارات المقفلة تحتاج تسجيلاً من الإدارة لفتح كورساتها.</p></div></div>
     <div class="course-grid" id="pathsGrid"></div>`;
   const g = $('#pathsGrid');
   if (!list.length) { g.outerHTML = `<div class="empty"><i class="fas fa-route"></i><p>لا توجد مسارات.</p></div>`; return; }
   g.innerHTML = list.map(p => {
     const courses = State.courses.filter(c=>c.path_id===p.id);
-    return `<div class="path-card" data-pid="${p.id}">
-      <div class="path-thumb" style="background:${p.cover_image ? `url('${escapeHtml(p.cover_image)}') center/cover no-repeat` : p.color}">${p.cover_image ? '' : `<i class="fas ${p.icon}"></i>`}</div>
+    const locked = State.user.role !== 'admin' && !isEnrolledInPath(p);
+    return `<div class="path-card ${locked?'is-locked':''}" data-pid="${p.id}">
+      <div class="path-thumb" style="background:${p.cover_image ? `url('${escapeHtml(p.cover_image)}') center/cover no-repeat` : p.color}">
+        ${p.cover_image ? '' : `<i class="fas ${p.icon}"></i>`}
+        ${locked ? `<span class="badge-lock" title="غير مسجَّل"><i class="fas fa-lock"></i></span>` : ''}
+      </div>
       <h4>${escapeHtml(p.title)}</h4>
       <p class="muted">${escapeHtml(p.description||'')}</p>
       <div class="course-meta" style="margin-top:10px"><span><i class="fas fa-book"></i> ${courses.length} كورس</span></div>
@@ -872,8 +1332,10 @@ function renderPaths(){
     const card = e.target.closest('.path-card'); if (!card) return;
     const p = State.paths.find(x=>x.id===card.dataset.pid);
     const courses = State.courses.filter(c=>c.path_id===p.id);
+    const locked = State.user.role !== 'admin' && !isEnrolledInPath(p);
     modal({ title:p.title, wide:true, body:`
       <p>${escapeHtml(p.description||'')}</p>
+      ${locked ? `<div class="locked-banner"><i class="fas fa-lock"></i><div><strong>هذا المسار غير متاح لك بعد.</strong><p>تواصل مع إدارة المنصة لتسجيلك فيه.</p></div></div>` : ''}
       <div class="course-grid" id="pmCourses" style="margin-top:14px"></div>
     `});
     setTimeout(()=>renderCourseGrid('#pmCourses', courses),10);
@@ -974,6 +1436,12 @@ function renderChat() {
     renderAttachPreview();
   });
   $('#chatForm').addEventListener('submit', sendMessage);
+  // مستمع نقر واحد على حاوية الرسائل (تُستبدل محتوياتها فقط في كل رسم، لا
+  // العنصر نفسه)، يفتح صورة الرسالة كاملة بأمان دون استخدام onclick inline.
+  $('#chatBody').addEventListener('click', e => {
+    const el = e.target.closest('[data-open]');
+    if (el && el.dataset.open) window.open(el.dataset.open, '_blank', 'noopener,noreferrer');
+  });
   loadRoomMessages().then(subscribeRoom);
 }
 
@@ -1026,16 +1494,26 @@ function renderChatMessages() {
   $('#rIc').innerHTML = `<i class="fas ${room.icon}"></i>`;
   const body = $('#chatBody');
   const wasBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
+  // نجلب حالة "أونلاين" فقط لمرسلي الرسائل الظاهرة حالياً (بدون تحميل كل
+  // المستخدمين)، ونعيد الرسم إذا وصلت بيانات جديدة لم تكن مخزَّنة سابقاً.
+  refreshPresence(msgs.map(m => m.user_id)).then(changed => {
+    if (changed && State.view === 'chat' && State.currentRoom === rid) renderChatMessages();
+  });
   body.innerHTML = msgs.map(m => {
     const me = m.user_id === State.user.id;
-    const prof = profileOf(m.user_id);
-    const online = prof?.online;
+    const online = m.user_id === State.user.id ? !!State.user.online : !!State.presence[m.user_id];
     const canDel = State.user.role==='admin' || me;
     let attHtml = '';
     if (m.attachment_url) {
-      if ((m.attachment_type||'').startsWith('image/')) attHtml = `<img class="chat-img" src="${m.attachment_url}" onclick="window.open('${m.attachment_url}','_blank')"/>`;
-      else if ((m.attachment_type||'').startsWith('video/')) attHtml = `<video controls src="${m.attachment_url}" style="max-width:280px;border-radius:10px;margin-top:6px"></video>`;
-      else attHtml = `<a class="chat-file" href="${m.attachment_url}" target="_blank" download="${escapeHtml(m.attachment_name||'file')}"><i class="fas fa-paperclip"></i> ${escapeHtml(m.attachment_name||'تحميل الملف')}</a>`;
+      // الرابط قد يكون قيمة أدخلها أي مستخدم مسجَّل عبر جدول chat_messages
+      // مباشرة (وليس بالضرورة عبر رفع ملف فعلي من الواجهة)، لذا يُعامَل هنا
+      // كمُدخل غير موثوق: يُتحقَّق من أنه http/https فعلياً (safeUrl)، ويُستخدم
+      // مستمع نقر عبر data-open بدل onclick="" inline لمنع أي حقن جافاسكربت
+      // حتى لو كان الرابط نفسه محتوياً على علامات اقتباس أو أحرف خاصة.
+      const safe = escapeHtml(safeUrl(m.attachment_url));
+      if ((m.attachment_type||'').startsWith('image/')) attHtml = `<img class="chat-img" src="${safe}" data-open="${safe}"/>`;
+      else if ((m.attachment_type||'').startsWith('video/')) attHtml = `<video controls src="${safe}" style="max-width:280px;border-radius:10px;margin-top:6px"></video>`;
+      else attHtml = `<a class="chat-file" href="${safe}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(m.attachment_name||'file')}"><i class="fas fa-paperclip"></i> ${escapeHtml(m.attachment_name||'تحميل الملف')}</a>`;
     }
     return `<div class="msg ${me?'me':''}">
       <div class="avatar">${escapeHtml((m.user_name||'?')[0])}<span class="online-dot ${online?'on':''}"></span></div>
@@ -1070,9 +1548,10 @@ function renderLive() {
   if (s) {
     if (s.kind==='hls') player = `<div class="live-player"><video id="liveV" controls autoplay playsinline></video></div>`;
     else if (s.kind==='youtube') {
-      const id = (s.url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)||[])[1] || s.url;
-      player = `<div class="live-player"><iframe src="https://www.youtube.com/embed/${id}?autoplay=1" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>`;
-    } else player = `<div class="live-player"><iframe src="${s.url}" allow="autoplay; fullscreen"></iframe></div>`;
+      const id = (s.url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)||[])[1];
+      const embedSrc = id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1` : safeUrl(s.url);
+      player = `<div class="live-player"><iframe src="${escapeHtml(embedSrc)}" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>`;
+    } else player = `<div class="live-player"><iframe src="${escapeHtml(safeUrl(s.url))}" allow="autoplay; fullscreen"></iframe></div>`;
   }
   $('#viewWrap').innerHTML = `
     <div class="page-head"><div><h1>البث المباشر</h1><p>${s?escapeHtml(s.title):'انتظر بدء البث من قِبَل المدير.'}</p></div></div>
@@ -1080,8 +1559,9 @@ function renderLive() {
     <div class="section">${player}</div>`;
   if (s && s.kind==='hls' && $('#liveV')) {
     const v = $('#liveV');
-    if (window.Hls && window.Hls.isSupported()) { const h = new Hls(); h.loadSource(s.url); h.attachMedia(v); }
-    else { v.src = s.url; }
+    const hlsUrl = safeUrl(s.url);
+    if (window.Hls && window.Hls.isSupported()) { const h = new Hls(); h.loadSource(hlsUrl); h.attachMedia(v); }
+    else { v.src = hlsUrl; }
   }
   if (isAdmin) {
     if ($('#startLive')) $('#startLive').addEventListener('click', openStartLiveModal);
@@ -1310,12 +1790,13 @@ function renderManageQuizzes() {
       <button class="btn btn-primary" id="addQ"><i class="fas fa-plus"></i> اختبار جديد</button>
     </div>
     <div class="section"><div class="table-wrap"><table>
-      <thead><tr><th>الاختبار</th><th>الكورس</th><th>الأسئلة</th><th></th></tr></thead>
+      <thead><tr><th>الاختبار</th><th>الكورس</th><th>المدة</th><th>الأسئلة</th><th></th></tr></thead>
       <tbody>${State.quizzes.length ? State.quizzes.map(z=>{
         const c = State.courses.find(x=>x.id===z.course_id);
         return `<tr>
           <td><strong>${escapeHtml(z.title)}</strong>${z.description?`<div class="muted">${escapeHtml(z.description)}</div>`:''}</td>
           <td>${c?escapeHtml(c.title):'<span class="muted">— كورس محذوف —</span>'}</td>
+          <td>${z.duration_minutes ?? '—'} د</td>
           <td id="qcount-${z.id}">…</td>
           <td><div class="row-actions">
             <button class="icon-btn" data-questions-z="${z.id}" title="الأسئلة"><i class="fas fa-list-check"></i></button>
@@ -1324,7 +1805,7 @@ function renderManageQuizzes() {
             <button class="icon-btn" data-del-z="${z.id}" title="حذف" style="color:var(--danger)"><i class="fas fa-trash"></i></button>
           </div></td>
         </tr>`;
-      }).join('') : `<tr><td colspan="4"><div class="empty"><i class="fas fa-file-circle-question"></i><p>لا توجد اختبارات بعد.</p></div></td></tr>`}</tbody>
+      }).join('') : `<tr><td colspan="5"><div class="empty"><i class="fas fa-file-circle-question"></i><p>لا توجد اختبارات بعد.</p></div></td></tr>`}</tbody>
     </table></div></div>`;
   $('#addQ').addEventListener('click', ()=>openQuizModal());
   $$('[data-questions-z]').forEach(b=>b.addEventListener('click', ()=>openManageQuizQuestions(b.dataset.questionsZ)));
@@ -1344,24 +1825,28 @@ function renderManageQuizzes() {
 }
 
 function openQuizModal(id) {
-  const z = id ? State.quizzes.find(x=>x.id===id) : { title:'', description:'', course_id: State.courses[0]?.id || '' };
+  const z = id ? State.quizzes.find(x=>x.id===id) : { title:'', description:'', course_id: State.courses[0]?.id || '', duration_minutes: 10 };
   if (!State.courses.length) { toast('لا توجد كورسات','أضف كورساً أولاً قبل إنشاء اختبار','warning'); return; }
   const courseOpts = State.courses.map(c=>`<option value="${c.id}" ${z.course_id===c.id?'selected':''}>${escapeHtml(c.title)}</option>`).join('');
   const body = `<div class="form">
     <div class="field"><label>اسم الاختبار</label><input id="zTitle" value="${escapeHtml(z.title)}" placeholder="مثال: اختبار الوحدة الأولى"/></div>
     <div class="field"><label>وصف الاختبار (اختياري)</label><textarea id="zDesc" rows="3">${escapeHtml(z.description||'')}</textarea></div>
     <div class="field"><label>الكورس</label><select id="zCourse">${courseOpts}</select></div>
+    <div class="field"><label>مدة الاختبار (بالدقائق)</label><input id="zDuration" type="number" min="1" step="1" value="${z.duration_minutes ?? 10}" placeholder="مثال: 15"/></div>
   </div>`;
   const m = modal({ title: id?'تعديل اختبار':'اختبار جديد', body, footer:`<button class="btn btn-ghost" data-close>إلغاء</button><button class="btn btn-primary" id="saveZ">حفظ</button>`});
   m.root.querySelector('[data-close]').addEventListener('click', m.close);
   m.root.querySelector('#saveZ').addEventListener('click', async ()=>{
+    const duration = parseInt(m.root.querySelector('#zDuration').value, 10);
     const data = {
       title: m.root.querySelector('#zTitle').value.trim(),
       description: m.root.querySelector('#zDesc').value.trim() || null,
       course_id: m.root.querySelector('#zCourse').value,
+      duration_minutes: duration,
     };
     if (!data.title) return toast('اسم الاختبار مطلوب','','warning');
     if (!data.course_id) return toast('اختر الكورس','','warning');
+    if (!duration || duration < 1) return toast('حدد مدة صحيحة للاختبار بالدقائق','','warning');
     let error;
     if (id) ({ error } = await sb.from('quizzes').update(data).eq('id', id));
     else ({ error } = await sb.from('quizzes').insert({ ...data, created_by: State.user.id }));
@@ -1389,6 +1874,7 @@ async function openManageQuizQuestions(quizId) {
       </div>
     </div>`;
   }).join('') : `<div class="empty"><i class="fas fa-circle-info"></i><p>لا توجد أسئلة بعد.</p></div>`;
+  mbGo('manageQuizQuestions', { quizId });
   $('#viewWrap').innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back"><i class="fas fa-arrow-right"></i> رجوع للاختبارات</button>
     <div class="section" style="margin-top:16px">
@@ -1495,6 +1981,8 @@ function openQuestionModal(quizId, questionId, onSaved) {
 }
 
 /* ---- Admin: view results of a quiz ---- */
+const attemptStatusLabel = s => s==='auto_submitted' ? 'تسليم تلقائي (انتهى الوقت)' : 'تم التسليم';
+
 async function openQuizResults(quizId) {
   const z = State.quizzes.find(x=>x.id===quizId); if (!z) return;
   const { data: attempts, error } = await sb.from('quiz_attempts').select('*').eq('quiz_id', quizId).order('submitted_at',{ascending:false});
@@ -1506,19 +1994,84 @@ async function openQuizResults(quizId) {
       <td>${escapeHtml(p?.name || 'طالب محذوف')}</td>
       <td>${a.score} / ${a.max_score}</td>
       <td>${pct}%</td>
-      <td>${fmtDate(a.submitted_at)}</td>
+      <td>${fmtDateTime(a.submitted_at)}</td>
+      <td>${attemptStatusLabel(a.status)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="4"><div class="empty"><i class="fas fa-inbox"></i><p>لا توجد نتائج بعد.</p></div></td></tr>`;
+  }).join('') : `<tr><td colspan="5"><div class="empty"><i class="fas fa-inbox"></i><p>لا توجد نتائج بعد.</p></div></td></tr>`;
+  mbGo('quizResults', { quizId });
   $('#viewWrap').innerHTML = `
     <button class="btn btn-ghost btn-sm" id="back"><i class="fas fa-arrow-right"></i> رجوع للاختبارات</button>
     <div class="section" style="margin-top:16px">
-      <div class="section-head"><h3>نتائج: ${escapeHtml(z.title)}</h3></div>
+      <div class="section-head">
+        <h3>نتائج: ${escapeHtml(z.title)}</h3>
+        <button class="btn btn-ghost btn-sm" id="printResults"><i class="fas fa-print"></i> طباعة النتائج / PDF</button>
+      </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>الطالب</th><th>الدرجة</th><th>النسبة</th><th>تاريخ التسليم</th></tr></thead>
+        <thead><tr><th>الطالب</th><th>الدرجة</th><th>النسبة</th><th>تاريخ ووقت التسليم</th><th>حالة المحاولة</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
     </div>`;
   $('#back').addEventListener('click', ()=>navigate('manageQuizzes'));
+  $('#printResults').addEventListener('click', ()=> printQuizResults(z, attempts||[]));
+}
+
+/* ---- Admin: print / save-as-PDF report for one quiz's results ---- */
+function printQuizResults(quiz, attempts) {
+  const rows = attempts.length ? attempts.map(a=>{
+    const p = profileOf(a.user_id);
+    const pct = a.max_score ? Math.round((a.score/a.max_score)*100) : 0;
+    return `<tr>
+      <td>${escapeHtml(p?.name || 'طالب محذوف')}</td>
+      <td>${escapeHtml(quiz.title)}</td>
+      <td>${a.score} / ${a.max_score}</td>
+      <td>${pct}%</td>
+      <td>${fmtDateTime(a.submitted_at)}</td>
+      <td>${attemptStatusLabel(a.status)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:center">لا توجد نتائج بعد</td></tr>`;
+  const html = `<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>تقرير نتائج: ${escapeHtml(quiz.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; padding: 28px; color:#1a2238; }
+  .head { display:flex; align-items:center; justify-content:space-between; border-bottom: 2px solid #4f46e5; padding-bottom:12px; margin-bottom:18px; }
+  .head h1 { font-size:20px; margin:0; color:#4f46e5; }
+  .head .brand { font-weight:800; font-size:16px; color:#4f46e5; }
+  .meta { color:#555; font-size:13px; margin-bottom:18px; display:flex; gap:18px; flex-wrap:wrap; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border:1px solid #ccc; padding:8px 10px; text-align:right; }
+  th { background:#eef0ff; color:#3730a3; }
+  tbody tr:nth-child(even) { background:#f9fafc; }
+  .footer { margin-top:22px; font-size:11px; color:#888; text-align:center; }
+  @media print { body{ padding:0; } }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div class="brand"><i></i>مَقْلَمَة</div>
+    <h1>تقرير نتائج الاختبار</h1>
+  </div>
+  <div class="meta">
+    <span><strong>اسم الاختبار:</strong> ${escapeHtml(quiz.title)}</span>
+    <span><strong>عدد الطلاب:</strong> ${attempts.length}</span>
+    <span><strong>تاريخ إصدار التقرير:</strong> ${fmtDateTime(new Date().toISOString())}</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>اسم الطالب</th><th>اسم الاختبار</th><th>الدرجة</th><th>النسبة المئوية</th><th>تاريخ ووقت الامتحان</th><th>حالة المحاولة</th></tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="footer">تم إنشاء هذا التقرير آلياً من منصة مَقْلَمَة التعليمية</div>
+  <script>window.onload = function(){ window.print(); };</script>
+</body>
+</html>`;
+  const w = window.open('', '_blank');
+  if (!w) { toast('يرجى السماح بالنوافذ المنبثقة لطباعة التقرير','','warning'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 /* ============== Views: Profile ============== */
@@ -1681,7 +2234,8 @@ function renderNotifications() {
 /* ============== Boot ============== */
 window.addEventListener('DOMContentLoaded', async () => {
   cacheLoad(); applyTheme();
-  initLogin(); initShell();
+  renderFooterSocial();
+  initLogin(); initShell(); initMobileBack();
   setTimeout(async () => {
     $('#loadingScreen').classList.add('fade-out');
     setTimeout(()=>$('#loadingScreen').remove(), 400);

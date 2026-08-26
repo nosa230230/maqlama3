@@ -1,6 +1,36 @@
 [build]
   publish = "."
 
+# ============== Security hardening ==============
+# publish = "." serves EVERY file in this folder as a public static
+# asset, including files that were only ever meant to be read by the
+# site owner (DB schema, setup notes, Edge Function source). None of
+# these contain live secrets (no service_role key is ever committed —
+# see SUPABASE_SETUP.md), but they still give an attacker a free map
+# of the backend, so they're blocked from direct public access here.
+# These rules must come BEFORE the catch-all "/* -> /index.html" rule
+# below, since Netlify uses the first matching redirect.
+[[redirects]]
+  from = "/supabase.sql"
+  to = "/index.html"
+  status = 404
+[[redirects]]
+  from = "/README.md"
+  to = "/index.html"
+  status = 404
+[[redirects]]
+  from = "/SUPABASE_SETUP.md"
+  to = "/index.html"
+  status = 404
+[[redirects]]
+  from = "/START_HERE.txt"
+  to = "/index.html"
+  status = 404
+[[redirects]]
+  from = "/supabase/*"
+  to = "/index.html"
+  status = 404
+
 [[headers]]
   for = "/sw.js"
   [headers.values]
