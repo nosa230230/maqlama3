@@ -71,19 +71,14 @@ function requireSb(){ if(!sb){ toast('Supabase غير مفعّل','عدّل env.
  *   whatsapp: 'https://wa.me/9665XXXXXXXX'
  * =================================================================== */
 const SOCIAL_LINKS = {
-  facebook:  '', // ضع رابط صفحة الفيسبوك هنا
-  telegram:  '', // ضع رابط قناة/جروب التيليجرام هنا
-  whatsapp:  '', // ضع رابط واتساب هنا، مثل: https://wa.me/9665XXXXXXXX
+  facebook:  'https://www.facebook.com/share/1D4JXED7yv/', //www.facebook.com/share/1D4JXED7yv/
+  whatsapp:  'https://wa.me/01062970993', // ضع رابط واتساب هنا، مثل: https://wa.me/9665XXXXXXXX
   instagram: '', // ضع رابط الإنستغرام هنا
-  youtube:   '', // ضع رابط قناة اليوتيوب هنا
 };
 
 const SOCIAL_META = {
   facebook:  { label: 'فيسبوك',   icon: 'fa-brands fa-facebook-f' },
-  telegram:  { label: 'تيليجرام', icon: 'fa-brands fa-telegram'   },
   whatsapp:  { label: 'واتساب',   icon: 'fa-brands fa-whatsapp'   },
-  instagram: { label: 'إنستغرام', icon: 'fa-brands fa-instagram'  },
-  youtube:   { label: 'يوتيوب',   icon: 'fa-brands fa-youtube'    },
 };
 
 /* ===================================================================
