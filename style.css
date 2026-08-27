@@ -377,7 +377,7 @@ a {
 }
 
 .login-welcome h1 {
-  font-size: 35px;
+  font-size: 40px;
   font-weight: 900;
   color: var(--primary);
   margin-bottom: 10px;
@@ -1945,6 +1945,7 @@ tbody tr:hover {
 
 
 .footer-social {
+  margin-top: -3px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2141,6 +2142,7 @@ tbody tr:hover {
   margin-top: 3px;
   font-size: 12px;
   /* opacity: 0.7; */
+   border-bottom: 20px solid #f4f6fb;
 }
 
 

@@ -71,14 +71,14 @@ function requireSb(){ if(!sb){ toast('Supabase غير مفعّل','عدّل env.
  *   whatsapp: 'https://wa.me/9665XXXXXXXX'
  * =================================================================== */
 const SOCIAL_LINKS = {
-  facebook:  'https://www.facebook.com/share/1D4JXED7yv/', //www.facebook.com/share/1D4JXED7yv/
+    facebook:  'https://www.facebook.com/share/1D4JXED7yv/', //www.facebook.com/share/1D4JXED7yv/
   whatsapp:  'https://wa.me/01062970993', // ضع رابط واتساب هنا، مثل: https://wa.me/9665XXXXXXXX
   instagram: '', // ضع رابط الإنستغرام هنا
 };
 
 const SOCIAL_META = {
-  facebook:  { label: 'فيسبوك',   icon: 'fa-brands fa-facebook-f' },
-  whatsapp:  { label: 'واتساب',   icon: 'fa-brands fa-whatsapp'   },
+   facebook:  { label: 'فيسبوك',   icon: 'fa-brands fa-facebook-f' },
+   whatsapp:  { label: 'واتساب',   icon: 'fa-brands fa-whatsapp'   },
 };
 
 /* ===================================================================
