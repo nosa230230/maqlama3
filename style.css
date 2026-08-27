@@ -2094,12 +2094,12 @@ tbody tr:hover {
 .login-footer {
   width: 100%;
   text-align: center;
-  margin-top: -140px;
+  margin-top: -50px;
   padding: 18px 15px;
 }
 
 .contact-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   margin-bottom: 12px;
 }
