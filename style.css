@@ -384,7 +384,7 @@ a {
 }
 
 .login-welcome .muted {
-  max-width: 325px;
+  max-width: 326px;
   margin: 0 auto;
   line-height: 1.8;
 }
@@ -1706,7 +1706,7 @@ tbody tr:hover {
   }
 
   .login-welcome h1 {
-    font-size: 26px;
+    font-size: 28px;
   }
 }
 
