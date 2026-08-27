@@ -86,6 +86,133 @@ const SOCIAL_META = {
   youtube:   { label: 'يوتيوب',   icon: 'fa-brands fa-youtube'    },
 };
 
+/* ===================================================================
+ * "اشترك الآن" — بيانات التواصل التي تظهر لأي زائر أو طالب يحاول فتح
+ * كورس/مسار غير مسموح له به. عدّل الرقم أو الرابط من هنا فقط.
+ * =================================================================== */
+const SUBSCRIBE_CONTACT = {
+  whatsappNumber:  '201062970993', // 01062970993 بصيغة دولية بدون + أو أصفار
+  whatsappDisplay: '',
+  facebook: 'https://www.facebook.com/share/1D4JXED7yv/',
+};
+
+/* مودال "اشترك الآن" — يظهر عند محاولة فتح كورس/مسار غير مسموح به،
+ * سواء لزائر لم يسجّل الدخول أو لطالب مسجَّل غير مضاف لهذا المحتوى. */
+function openSubscribeModal(name) {
+  const waLink = `https://wa.me/${SUBSCRIBE_CONTACT.whatsappNumber}`;
+  const fbLink = SUBSCRIBE_CONTACT.facebook;
+  const body = `
+    <div class="subscribe-box">
+      <div class="subscribe-ic"><i class="fas fa-lock"></i></div>
+      <p>${name ? `<strong>${escapeHtml(name)}</strong><br/>` : ''}هذا المحتوى غير متاح لك حالياً. تواصل معنا للاشتراك وفتح الوصول الكامل.</p>
+      <div class="subscribe-actions">
+        <a class="btn btn-primary" href="${escapeHtml(waLink)}" target="_blank" rel="noopener noreferrer">
+          <i class="fa-brands fa-whatsapp"></i> واتساب — ${escapeHtml(SUBSCRIBE_CONTACT.whatsappDisplay)}
+        </a>
+        <a class="btn btn-ghost" href="${escapeHtml(fbLink)}" target="_blank" rel="noopener noreferrer">
+          <i class="fa-brands fa-facebook"></i> صفحتنا على فيسبوك
+        </a>
+      </div>
+    </div>`;
+  modal({ title: 'اشترك الآن', body, footer: `<button class="btn btn-ghost" data-close>إغلاق</button>` });
+}
+
+/* ===================================================================
+ * "الأقسام" — كتالوج عام (بدون تسجيل دخول) يعرض أسماء وصور كل الكورسات
+ * والمسارات المتاحة على المنصة. يظهر من قائمة الـ 3 خطوط في صفحة تسجيل
+ * الدخول. يعتمد على صلاحية anon محدودة في قاعدة البيانات تسمح بقراءة
+ * عناوين/أوصاف/صور الكورسات والمسارات فقط — لا يوجد أي وصول من هنا إلى
+ * المحاضرات أو الاختبارات أو البث أو أي محتوى فعلي.
+ * =================================================================== */
+let guestCatalog = { courses: null, paths: null, tab: 'courses', error: false };
+
+function guestCardsHtml(kind, list) {
+  if (guestCatalog.error) {
+    return `<div class="empty"><i class="fas fa-triangle-exclamation"></i><p>تعذّر تحميل الأقسام حالياً، حاول مرة أخرى بعد قليل.</p></div>`;
+  }
+  if (!list || !list.length) {
+    return `<div class="empty"><i class="fas fa-folder-open"></i><p>لا يوجد محتوى بعد.</p></div>`;
+  }
+  return `<div class="course-grid">${list.map(item => `
+    <div class="${kind==='courses'?'course-card':'path-card'} is-locked" data-gid="${item.id}" data-gname="${escapeHtml(item.title)}">
+      <div class="${kind==='courses'?'course-thumb':'path-thumb'}" style="background:${item.cover_image ? `url('${escapeHtml(item.cover_image)}') center/cover no-repeat` : (item.color||'linear-gradient(135deg,#4f46e5,#06b6d4)')}">
+        ${item.cover_image ? '' : `<i class="fas ${item.icon||(kind==='courses'?'fa-book':'fa-route')}"></i>`}
+        ${kind==='courses' ? `<span class="badge-cat">${escapeHtml(item.category||'')}</span>` : ''}
+        <span class="badge-lock" title="يتطلب اشتراك"><i class="fas fa-lock"></i></span>
+      </div>
+      <div class="course-body">
+        <h4>${escapeHtml(item.title)}</h4>
+        <p>${escapeHtml(item.description||'')}</p>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+async function loadGuestCatalogData() {
+  if (!sb) return;
+  if (guestCatalog.courses === null) {
+    const { data, error } = await sb.from('courses')
+      .select('id,title,category,description,icon,color,cover_image')
+      .order('created_at', { ascending: false });
+    if (error) {
+      // فشل حقيقي (غالباً صلاحيات RLS ناقصة على مشروع Supabase) — نميّزه هنا
+      // عن حالة "لا توجد كورسات فعلاً" حتى يسهل تشخيصه بدل رسالة "لا يوجد
+      // محتوى" المضلِّلة. راجع سياسات anon على جدولي courses/learning_paths
+      // في supabase.sql (قسم PUBLIC GUEST CATALOG BROWSING / HOTFIX).
+      // لا نخزّن null بشكل دائم حتى تُعاد المحاولة تلقائياً في المرة القادمة.
+      console.error('guest catalog courses error', error);
+      guestCatalog.error = true;
+    } else {
+      guestCatalog.courses = data || [];
+    }
+  }
+  if (guestCatalog.paths === null) {
+    const { data, error } = await sb.from('learning_paths')
+      .select('id,title,description,icon,color,cover_image')
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('guest catalog paths error', error);
+      guestCatalog.error = true;
+    } else {
+      guestCatalog.paths = data || [];
+    }
+  }
+}
+
+function renderGuestCatalogBody() {
+  const body = $('#guestCatalogBody');
+  if (!body) return;
+  const list = guestCatalog.tab === 'courses' ? guestCatalog.courses : guestCatalog.paths;
+  body.innerHTML = guestCardsHtml(guestCatalog.tab, list || []);
+  $$('#guestCatalogBody [data-gid]').forEach(card => {
+    card.addEventListener('click', () => openSubscribeModal(card.dataset.gname));
+  });
+}
+
+async function openGuestCatalog() {
+  if (!sb) { toast('غير متاح حالياً', '', 'warning'); return; }
+  guestCatalog.tab = 'courses';
+  guestCatalog.error = false;
+  const body = `
+    <div class="guest-locked-hint"><i class="fas fa-circle-info"></i>
+      <span>تصفّح مجاني لكل الكورسات والمسارات — الاشتراك مطلوب فقط لفتح محتواها.</span>
+    </div>
+    <div class="cat-tabs">
+      <button type="button" class="login-tab active" data-gtab="courses">الكورسات</button>
+      <button type="button" class="login-tab" data-gtab="paths">المسارات التعليمية</button>
+    </div>
+    <div id="guestCatalogBody"><div class="empty"><i class="fas fa-spinner fa-spin"></i><p>جارٍ التحميل...</p></div></div>`;
+  const m = modal({ title: 'الأقسام', wide: true, body });
+  m.root.querySelectorAll('[data-gtab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      guestCatalog.tab = btn.dataset.gtab;
+      m.root.querySelectorAll('[data-gtab]').forEach(x => x.classList.toggle('active', x===btn));
+      renderGuestCatalogBody();
+    });
+  });
+  await loadGuestCatalogData();
+  renderGuestCatalogBody();
+}
+
 function renderFooterSocial() {
   const wrap = document.getElementById('footerSocial');
   if (!wrap) return;
@@ -174,9 +301,6 @@ const State = {
   user: null,           // profiles row { id, username, name, role, ... }
   session: null,        // supabase session
   view: 'dashboard',
-  currentRoom: 'r_general',
-  rooms: [],
-  messagesByRoom: {},
   courses: [],
   lessons: [],          // flat list
   paths: [],
@@ -185,15 +309,15 @@ const State = {
   quizzes: [],
   myQuizAttempts: [],   // current user's own quiz results
   profiles: [],         // admin: every profile. student: RLS only ever returns their own row.
-  presence: {},         // uid -> online boolean, fetched narrowly for chat (see chat_presence RPC)
+  presence: {},         // uid -> online boolean (kept for backward-compat; unused now that chat is removed)
   notifications: [],
-  liveStream: null,
+  liveStreams: [],       // active live streams the user can access (RLS already filters by course enrollment)
   settings: { theme: localStorage.getItem('maqlama_theme') || 'light' },
 };
 
 /* small cache to speed reloads (UI only) */
 function cacheSave(){ try{ localStorage.setItem(CACHE_KEY, JSON.stringify({
-  courses: State.courses, paths: State.paths, rooms: State.rooms, profiles: State.profiles
+  courses: State.courses, paths: State.paths, profiles: State.profiles
 })); }catch{} }
 function cacheLoad(){ try{ const r = JSON.parse(localStorage.getItem(CACHE_KEY)||'null'); if(r){ Object.assign(State, r); } }catch{} }
 
@@ -325,6 +449,8 @@ function initLogin() {
       menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
   }
+  const sectionsBtn = $('#openSectionsBtn');
+  if (sectionsBtn) sectionsBtn.addEventListener('click', openGuestCatalog);
   const loginThemeBtn = $('#loginThemeToggle');
   if (loginThemeBtn) {
     loginThemeBtn.addEventListener('click', () => {
@@ -383,7 +509,7 @@ async function afterLogin() {
   applyTheme();
   await enforceSingleDeviceSession();
   await Promise.all([
-    loadRooms(), loadCourses(), loadPaths(), loadProfiles(),
+    loadCourses(), loadPaths(), loadProfiles(),
     loadEnrollments(), loadNotifications(), loadActiveLive(),
     loadQuizzes(), loadMyQuizAttempts()
   ]);
@@ -393,10 +519,6 @@ async function afterLogin() {
 }
 
 /* ============== Data loaders ============== */
-async function loadRooms() {
-  const { data } = await sb.from('chat_rooms').select('*').order('created_at');
-  State.rooms = data || [];
-}
 async function loadCourses() {
   const { data } = await sb.from('courses').select('*').order('created_at',{ascending:false});
   State.courses = data || [];
@@ -479,10 +601,13 @@ async function loadNotifications() {
   }
 }
 async function loadActiveLive() {
-  const { data } = await sb.from('live_streams').select('*').eq('active', true)
-    .order('started_at',{ascending:false}).limit(1).maybeSingle();
-  State.liveStream = data || null;
-  $('#liveDot').style.display = State.liveStream ? 'inline-block' : 'none';
+  // الخادم (RLS) يُرجع فقط بثوث الكورسات التي الطالب مسجَّل بها فعلاً (أو
+  // كل البثوث النشطة لو أدمن) — لا حاجة لأي فلترة إضافية هنا في الواجهة.
+  const { data, error } = await sb.from('live_streams').select('*').eq('active', true)
+    .order('started_at', { ascending: false });
+  if (error) { console.error(error); State.liveStreams = []; }
+  else State.liveStreams = data || [];
+  $('#liveDot').style.display = State.liveStreams.length ? 'inline-block' : 'none';
 }
 
 /* ============== Realtime ============== */
@@ -520,7 +645,6 @@ function subscribeGlobal() {
     .on('postgres_changes', { event:'UPDATE', schema:'public', table:'profiles' }, async (p) => {
       const i = State.profiles.findIndex(x=>x.id===p.new.id);
       if (i>=0) State.profiles[i] = p.new;
-      if (State.view==='chat') renderChatMessages();
       if (State.view==='students') renderStudents();
       // جهاز آخر أصبح هو الجلسة النشطة لهذا الحساب؟ سجّل الخروج فوراً من هنا.
       if (State.user && p.new.id === State.user.id && State.user.role !== 'admin') {
@@ -531,25 +655,6 @@ function subscribeGlobal() {
       }
     })
     .subscribe());
-}
-
-let roomChannel = null;
-function subscribeRoom() {
-  if (roomChannel) { try{ sb.removeChannel(roomChannel); }catch{} roomChannel = null; }
-  const rid = State.currentRoom;
-  roomChannel = sb.channel('room:'+rid)
-    .on('postgres_changes', { event:'INSERT', schema:'public', table:'chat_messages', filter:`room_id=eq.${rid}` }, (p) => {
-      const arr = State.messagesByRoom[rid] || (State.messagesByRoom[rid]=[]);
-      if (arr.some(m=>m.id===p.new.id)) return;
-      arr.push(p.new);
-      if (State.view==='chat') renderChatMessages();
-    })
-    .on('postgres_changes', { event:'DELETE', schema:'public', table:'chat_messages', filter:`room_id=eq.${rid}` }, (p) => {
-      const arr = State.messagesByRoom[rid] || [];
-      State.messagesByRoom[rid] = arr.filter(m=>m.id!==p.old.id);
-      if (State.view==='chat') renderChatMessages();
-    })
-    .subscribe();
 }
 
 /* ============== Online presence ============== */
@@ -701,7 +806,6 @@ function navigate(view) {
     case 'dashboard': renderDashboard(); break;
     case 'courses':   renderCoursesView(); break;
     case 'paths':     renderPaths(); break;
-    case 'chat':      renderChat(); break;
     case 'live':      renderLive(); break;
     case 'students':  renderStudents(); break;
     case 'manageCourses': renderManageCourses(); break;
@@ -744,21 +848,6 @@ function isEnrolledInPath(p) {
 }
 function lessonsOf(courseId){ return State.lessons.filter(l=>l.course_id===courseId); }
 function profileOf(uid){ return State.profiles.find(p=>p.id===uid); }
-
-// يجلب حالة "أونلاين" لمُعرِّفات مستخدمين محدَّدين فقط (مثلاً مرسلو رسائل
-// ظاهرة في الشات)، عبر دالة قاعدة بيانات ضيّقة النطاق (chat_presence) بدل
-// تحميل كل البروفايلات دفعة واحدة — هذا لا يكشف أي بيانات أخرى (لا بريد، لا
-// اسم مستخدم، لا دور) ولا يسمح بحصر/عدّ كل المستخدمين على المنصة.
-async function refreshPresence(ids) {
-  const missing = [...new Set(ids)].filter(id => id && !(id in State.presence));
-  if (!missing.length) return false;
-  try {
-    const { data, error } = await sb.rpc('chat_presence', { p_ids: missing });
-    if (error) throw error;
-    (data || []).forEach(r => { State.presence[r.id] = !!r.online; });
-    return true;
-  } catch (e) { console.error(e); return false; }
-}
 
 /* ============== Views: Dashboard ============== */
 function renderDashboard() {
@@ -823,7 +912,13 @@ function renderCourseGrid(sel, list) {
     </div>`;
   }).join('');
   el.addEventListener('click', e => {
-    const card = e.target.closest('.course-card'); if (card) openCourse(card.dataset.id);
+    const card = e.target.closest('.course-card'); if (!card) return;
+    if (card.classList.contains('is-locked')) {
+      const c = list.find(x => x.id === card.dataset.id);
+      openSubscribeModal(c ? c.title : '');
+      return;
+    }
+    openCourse(card.dataset.id);
   });
 }
 
@@ -876,7 +971,8 @@ async function openCourse(id) {
   const lockedNotice = !enrolled && !isAdmin
     ? `<div class="locked-banner"><i class="fas fa-lock"></i>
         <div><strong>هذا الكورس غير متاح لك بعد.</strong>
-        <p>تواصل مع إدارة المنصة لتسجيلك في هذا الكورس، وسيظهر لك محتواه فور تسجيلك.</p></div>
+        <p>تواصل مع إدارة المنصة لتسجيلك في هذا الكورس، وسيظهر لك محتواه فور تسجيلك.</p>
+        <button type="button" class="btn btn-primary btn-sm" id="courseSubscribeBtn" style="margin-top:10px"><i class="fas fa-crown"></i> اشترك الآن</button></div>
       </div>`
     : '';
 
@@ -929,6 +1025,7 @@ async function openCourse(id) {
     ${accordionSection({ key:'quizzes', icon:'fa-file-circle-question', title:'الاختبارات الإلكترونية', count:courseQuizzes.length, bodyHtml:quizzesHtml })}
   `;
   $('#back').addEventListener('click', ()=>navigate('courses'));
+  if ($('#courseSubscribeBtn')) $('#courseSubscribeBtn').addEventListener('click', ()=>openSubscribeModal(c.title));
   initAccordions($('#viewWrap'));
   if ($('#addLesson')) $('#addLesson').addEventListener('click', ()=>openAddLessonModal(c.id));
   $$('.lesson-item[data-lid]').forEach(it => {
@@ -1331,11 +1428,11 @@ function renderPaths(){
   g.addEventListener('click', e => {
     const card = e.target.closest('.path-card'); if (!card) return;
     const p = State.paths.find(x=>x.id===card.dataset.pid);
-    const courses = State.courses.filter(c=>c.path_id===p.id);
     const locked = State.user.role !== 'admin' && !isEnrolledInPath(p);
+    if (locked) { openSubscribeModal(p.title); return; }
+    const courses = State.courses.filter(c=>c.path_id===p.id);
     modal({ title:p.title, wide:true, body:`
       <p>${escapeHtml(p.description||'')}</p>
-      ${locked ? `<div class="locked-banner"><i class="fas fa-lock"></i><div><strong>هذا المسار غير متاح لك بعد.</strong><p>تواصل مع إدارة المنصة لتسجيلك فيه.</p></div></div>` : ''}
       <div class="course-grid" id="pmCourses" style="margin-top:14px"></div>
     `});
     setTimeout(()=>renderCourseGrid('#pmCourses', courses),10);
@@ -1399,181 +1496,93 @@ function openPathModal(id){
   });
 }
 
-/* ============== Views: Chat ============== */
-let chatAttachment = null;
-
-function renderChat() {
-  if (!State.rooms.length) { $('#viewWrap').innerHTML = `<div class="empty"><p>لا توجد غرف.</p></div>`; return; }
-  if (!State.rooms.find(r=>r.id===State.currentRoom)) State.currentRoom = State.rooms[0].id;
-  $('#viewWrap').innerHTML = `
-    <div class="chat-wrap">
-      <div class="chat-rooms">
-        <div class="chat-rooms-head">الغرف</div>
-        ${State.rooms.map(r=>`
-          <div class="chat-room ${r.id===State.currentRoom?'active':''}" data-rid="${r.id}">
-            <div class="avatar"><i class="fas ${r.icon}"></i></div>
-            <div class="chat-room-info"><strong>${escapeHtml(r.name)}</strong><small>اضغط لفتح الغرفة</small></div>
-          </div>`).join('')}
-      </div>
-      <div class="chat-area">
-        <div class="chat-head"><div class="avatar" id="rIc"></div><div><strong id="rName"></strong><br/><small class="muted" id="rDesc"></small></div></div>
-        <div class="chat-body" id="chatBody"></div>
-        <div id="chatAttachPreview"></div>
-        <form class="chat-input" id="chatForm">
-          <label class="icon-btn" title="إرفاق ملف"><i class="fas fa-paperclip"></i><input type="file" id="chatFile" hidden accept="image/*,video/*,application/pdf,.zip,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"/></label>
-          <input id="chatMsg" placeholder="اكتب رسالتك..." autocomplete="off" />
-          <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i></button>
-        </form>
-      </div>
-    </div>`;
-  $$('.chat-room').forEach(r => r.addEventListener('click', async () => {
-    State.currentRoom = r.dataset.rid;
-    $$('.chat-room').forEach(x => x.classList.toggle('active', x===r));
-    await loadRoomMessages(); subscribeRoom();
-  }));
-  $('#chatFile').addEventListener('change', e => {
-    chatAttachment = e.target.files[0] || null;
-    renderAttachPreview();
-  });
-  $('#chatForm').addEventListener('submit', sendMessage);
-  // مستمع نقر واحد على حاوية الرسائل (تُستبدل محتوياتها فقط في كل رسم، لا
-  // العنصر نفسه)، يفتح صورة الرسالة كاملة بأمان دون استخدام onclick inline.
-  $('#chatBody').addEventListener('click', e => {
-    const el = e.target.closest('[data-open]');
-    if (el && el.dataset.open) window.open(el.dataset.open, '_blank', 'noopener,noreferrer');
-  });
-  loadRoomMessages().then(subscribeRoom);
+/* ============== Views: Live Stream (per-course) ============== */
+function liveCourseTitle(courseId) {
+  const c = State.courses.find(x => x.id === courseId);
+  return c ? c.title : 'كورس محذوف';
 }
 
-function renderAttachPreview(){
-  const el = $('#chatAttachPreview');
-  if (!chatAttachment) { el.innerHTML=''; return; }
-  el.innerHTML = `<div class="chat-attach-preview"><span><i class="fas fa-paperclip"></i> ${escapeHtml(chatAttachment.name)} (${Math.round(chatAttachment.size/1024)}KB)</span><button type="button" id="rmAtt"><i class="fas fa-xmark"></i></button></div>`;
-  $('#rmAtt').addEventListener('click', () => { chatAttachment=null; $('#chatFile').value=''; renderAttachPreview(); });
-}
-
-async function sendMessage(e) {
-  e.preventDefault();
-  const text = $('#chatMsg').value.trim();
-  if (!text && !chatAttachment) return;
-  $('#chatMsg').value=''; const file = chatAttachment; chatAttachment=null; $('#chatFile').value='';
-  renderAttachPreview();
-  let attachment_url=null, attachment_type=null, attachment_name=null;
-  if (file) {
-    try {
-      // show inline progress placeholder
-      const tmp = document.createElement('div'); tmp.className='upload-progress'; tmp.innerHTML='<div style="width:50%"></div>';
-      $('#chatBody').appendChild(tmp); $('#chatBody').scrollTop = $('#chatBody').scrollHeight;
-      const r = await uploadFile(file, 'chat');
-      attachment_url = r.url; attachment_type = file.type; attachment_name = file.name;
-      tmp.remove();
-    } catch(err){ console.error(err); return toast('فشل رفع المرفق', err.message, 'error'); }
+function livePlayerHtml(s) {
+  const vid = 'liveV_' + s.id;
+  if (s.kind === 'hls') return `<div class="live-player"><video id="${vid}" data-hls-url="${escapeHtml(safeUrl(s.url))}" controls autoplay playsinline></video></div>`;
+  if (s.kind === 'youtube') {
+    const idm = (s.url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/) || [])[1];
+    const embedSrc = idm ? `https://www.youtube.com/embed/${encodeURIComponent(idm)}?autoplay=1` : safeUrl(s.url);
+    return `<div class="live-player"><iframe src="${escapeHtml(embedSrc)}" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>`;
   }
-  const { error } = await sb.from('chat_messages').insert({
-    room_id: State.currentRoom, user_id: State.user.id, user_name: State.user.name,
-    text: text || null, attachment_url, attachment_type, attachment_name
-  });
-  if (error) toast('فشل الإرسال', error.message,'error');
+  return `<div class="live-player"><iframe src="${escapeHtml(safeUrl(s.url))}" allow="autoplay; fullscreen"></iframe></div>`;
 }
 
-async function loadRoomMessages(){
-  const rid = State.currentRoom;
-  const { data, error } = await sb.from('chat_messages').select('*').eq('room_id', rid)
-    .order('created_at',{ascending:true}).limit(200);
-  if (error) return console.error(error);
-  State.messagesByRoom[rid] = data || [];
-  renderChatMessages();
-}
-
-function renderChatMessages() {
-  const rid = State.currentRoom;
-  const room = State.rooms.find(r=>r.id===rid); if (!room || !$('#chatBody')) return;
-  const msgs = State.messagesByRoom[rid] || [];
-  $('#rName').textContent = room.name;
-  $('#rDesc').textContent = msgs.length+' رسالة';
-  $('#rIc').innerHTML = `<i class="fas ${room.icon}"></i>`;
-  const body = $('#chatBody');
-  const wasBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
-  // نجلب حالة "أونلاين" فقط لمرسلي الرسائل الظاهرة حالياً (بدون تحميل كل
-  // المستخدمين)، ونعيد الرسم إذا وصلت بيانات جديدة لم تكن مخزَّنة سابقاً.
-  refreshPresence(msgs.map(m => m.user_id)).then(changed => {
-    if (changed && State.view === 'chat' && State.currentRoom === rid) renderChatMessages();
-  });
-  body.innerHTML = msgs.map(m => {
-    const me = m.user_id === State.user.id;
-    const online = m.user_id === State.user.id ? !!State.user.online : !!State.presence[m.user_id];
-    const canDel = State.user.role==='admin' || me;
-    let attHtml = '';
-    if (m.attachment_url) {
-      // الرابط قد يكون قيمة أدخلها أي مستخدم مسجَّل عبر جدول chat_messages
-      // مباشرة (وليس بالضرورة عبر رفع ملف فعلي من الواجهة)، لذا يُعامَل هنا
-      // كمُدخل غير موثوق: يُتحقَّق من أنه http/https فعلياً (safeUrl)، ويُستخدم
-      // مستمع نقر عبر data-open بدل onclick="" inline لمنع أي حقن جافاسكربت
-      // حتى لو كان الرابط نفسه محتوياً على علامات اقتباس أو أحرف خاصة.
-      const safe = escapeHtml(safeUrl(m.attachment_url));
-      if ((m.attachment_type||'').startsWith('image/')) attHtml = `<img class="chat-img" src="${safe}" data-open="${safe}"/>`;
-      else if ((m.attachment_type||'').startsWith('video/')) attHtml = `<video controls src="${safe}" style="max-width:280px;border-radius:10px;margin-top:6px"></video>`;
-      else attHtml = `<a class="chat-file" href="${safe}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(m.attachment_name||'file')}"><i class="fas fa-paperclip"></i> ${escapeHtml(m.attachment_name||'تحميل الملف')}</a>`;
-    }
-    return `<div class="msg ${me?'me':''}">
-      <div class="avatar">${escapeHtml((m.user_name||'?')[0])}<span class="online-dot ${online?'on':''}"></span></div>
-      <div class="msg-bubble">
-        ${!me?`<strong style="font-size:12px;color:var(--primary)">${escapeHtml(m.user_name)}</strong><br/>`:''}
-        ${m.text?escapeHtml(m.text):''}
-        ${attHtml}
-        <small>${fmtTime(m.created_at)}</small>
-      </div>
-      ${canDel?`<button class="msg-del" data-del="${m.id}" title="حذف"><i class="fas fa-trash"></i></button>`:''}
-    </div>`;
-  }).join('');
-  if (wasBottom) body.scrollTop = body.scrollHeight;
-  $$('.msg-del').forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('حذف الرسالة؟')) return;
-    await sb.from('chat_messages').delete().eq('id', b.dataset.del);
-  }));
-}
-
-/* ============== Views: Live Stream ============== */
-function renderLive() {
-  const isAdmin = State.user.role==='admin';
-  const s = State.liveStream;
-  const adminCtl = isAdmin ? `<div class="section">
-    <div class="section-head"><h3>تحكّم الأدمن</h3>
-      ${s ? `<button class="btn btn-danger" id="stopLive"><i class="fas fa-stop"></i> إيقاف البث</button>`
-           : `<button class="btn btn-primary" id="startLive"><i class="fas fa-tower-broadcast"></i> بدء البث</button>`}
-    </div>
-    <p class="muted">يتم البث عبر رابط HLS أو رابط يوتيوب/iframe. الطلاب يشاهدوا مباشرة دون إعادة تحميل.</p>
-  </div>` : '';
-  let player = `<div class="empty"><i class="fas fa-tower-broadcast"></i><p>لا يوجد بث مباشر حالياً.</p></div>`;
-  if (s) {
-    if (s.kind==='hls') player = `<div class="live-player"><video id="liveV" controls autoplay playsinline></video></div>`;
-    else if (s.kind==='youtube') {
-      const id = (s.url.match(/(?:v=|youtu\.be\/|embed\/)([\w-]{11})/)||[])[1];
-      const embedSrc = id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1` : safeUrl(s.url);
-      player = `<div class="live-player"><iframe src="${escapeHtml(embedSrc)}" allow="autoplay; encrypted-media" allowfullscreen></iframe></div>`;
-    } else player = `<div class="live-player"><iframe src="${escapeHtml(safeUrl(s.url))}" allow="autoplay; fullscreen"></iframe></div>`;
-  }
-  $('#viewWrap').innerHTML = `
-    <div class="page-head"><div><h1>البث المباشر</h1><p>${s?escapeHtml(s.title):'انتظر بدء البث من قِبَل المدير.'}</p></div></div>
-    ${adminCtl}
-    <div class="section">${player}</div>`;
-  if (s && s.kind==='hls' && $('#liveV')) {
-    const v = $('#liveV');
-    const hlsUrl = safeUrl(s.url);
+function initLivePlayers(root) {
+  root.querySelectorAll('video[data-hls-url]').forEach(v => {
+    const hlsUrl = v.dataset.hlsUrl;
+    if (!hlsUrl) return;
     if (window.Hls && window.Hls.isSupported()) { const h = new Hls(); h.loadSource(hlsUrl); h.attachMedia(v); }
     else { v.src = hlsUrl; }
-  }
+  });
+}
+
+function renderLive() {
+  const isAdmin = State.user.role === 'admin';
+  const streams = State.liveStreams || [];
+
+  const adminCtl = isAdmin ? `<div class="section">
+    <div class="section-head"><h3>تحكّم الأدمن</h3>
+      <button class="btn btn-primary" id="startLive"><i class="fas fa-tower-broadcast"></i> بدء بث جديد</button>
+    </div>
+    <p class="muted">كل بث مباشر مرتبط بكورس محدد — يشاهده فقط الطلاب المسجَّلون في ذلك الكورس (مباشرة أو عبر مساره).</p>
+  </div>` : '';
+
+  const streamsHtml = streams.length
+    ? streams.map(s => `
+      <div class="section">
+        <div class="section-head">
+          <h3><i class="fas fa-tower-broadcast" style="color:var(--danger,#ef4444)"></i> ${escapeHtml(s.title)} <span class="acc-count">(${escapeHtml(liveCourseTitle(s.course_id))})</span></h3>
+          ${isAdmin ? `<button class="btn btn-danger btn-sm" data-stop-live="${s.id}"><i class="fas fa-stop"></i> إيقاف</button>` : ''}
+        </div>
+        ${livePlayerHtml(s)}
+      </div>`).join('')
+    : `<div class="empty"><i class="fas fa-tower-broadcast"></i><p>${isAdmin ? 'لا يوجد بث مباشر نشط حالياً.' : 'لا يوجد بث مباشر حالياً لأي من كورساتك.'}</p></div>`;
+
+  $('#viewWrap').innerHTML = `
+    <div class="page-head"><div><h1>البث المباشر</h1><p>${streams.length ? 'البثوث المباشرة المتاحة لك الآن.' : 'انتظر بدء البث من قِبَل المدير لأحد كورساتك.'}</p></div></div>
+    ${adminCtl}
+    ${streamsHtml}`;
+
+  initLivePlayers($('#viewWrap'));
+
   if (isAdmin) {
     if ($('#startLive')) $('#startLive').addEventListener('click', openStartLiveModal);
-    if ($('#stopLive')) $('#stopLive').addEventListener('click', async () => {
-      await sb.from('live_streams').update({ active:false }).eq('id', s.id);
+    $$('[data-stop-live]').forEach(b => b.addEventListener('click', async () => {
+      await sb.from('live_streams').update({ active: false }).eq('id', b.dataset.stopLive);
       await loadActiveLive(); renderLive();
-    });
+    }));
   }
+}
+
+async function notifyCourseLive(courseId, courseTitle) {
+  try {
+    const { data: enrolled } = await sb.from('enrollments').select('user_id').eq('course_id', courseId);
+    const course = State.courses.find(c => c.id === courseId);
+    let pathEnrolled = [];
+    if (course && course.path_id) {
+      const { data } = await sb.from('path_enrollments').select('user_id').eq('path_id', course.path_id);
+      pathEnrolled = data || [];
+    }
+    const ids = [...new Set([...(enrolled || []), ...pathEnrolled].map(r => r.user_id))];
+    if (!ids.length) return;
+    await sb.from('notifications').insert(ids.map(uid => ({
+      user_id: uid, title: 'بث مباشر الآن', body: courseTitle, icon: 'fa-tower-broadcast'
+    })));
+  } catch (e) { console.error('notifyCourseLive failed', e); }
 }
 
 function openStartLiveModal(){
+  const courseOpts = State.courses.map(c => `<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('');
   const body = `<div class="form">
+    <div class="field"><label>الكورس</label>
+      <select id="lvCourse">${courseOpts || '<option value="">لا توجد كورسات</option>'}</select>
+    </div>
     <div class="field"><label>عنوان البث</label><input id="lvTitle" placeholder="حصة اليوم"/></div>
     <div class="field"><label>نوع المصدر</label>
       <select id="lvKind">
@@ -1587,14 +1596,17 @@ function openStartLiveModal(){
   const m = modal({ title:'بدء بث مباشر', body, footer:`<button class="btn btn-ghost" data-close>إلغاء</button><button class="btn btn-primary" id="goLive">بث</button>`});
   m.root.querySelector('[data-close]').addEventListener('click', m.close);
   m.root.querySelector('#goLive').addEventListener('click', async ()=>{
+    const courseId = m.root.querySelector('#lvCourse').value;
     const title = m.root.querySelector('#lvTitle').value.trim() || 'بث مباشر';
     const kind = m.root.querySelector('#lvKind').value;
     const url = m.root.querySelector('#lvUrl').value.trim();
+    if (!courseId) return toast('اختر الكورس','البث يجب أن يكون مرتبطاً بكورس محدد','warning');
     if (!url) return toast('الرابط مطلوب','','warning');
-    // close any active stream first
-    await sb.from('live_streams').update({ active:false }).eq('active', true);
-    await sb.from('live_streams').insert({ title, kind, url, started_by: State.user.id, active:true });
-    await sb.from('notifications').insert({ user_id:null, title:'بث مباشر', body:title, icon:'fa-tower-broadcast' });
+    // إيقاف أي بث نشط سابق لنفس الكورس فقط (لا يؤثر على بثوث كورسات أخرى)
+    await sb.from('live_streams').update({ active:false }).eq('active', true).eq('course_id', courseId);
+    await sb.from('live_streams').insert({ title, kind, url, course_id: courseId, started_by: State.user.id, active:true });
+    const course = State.courses.find(c => c.id === courseId);
+    await notifyCourseLive(courseId, course ? course.title : title);
     m.close(); await loadActiveLive(); renderLive();
   });
 }

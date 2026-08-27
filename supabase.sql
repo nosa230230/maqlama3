@@ -214,19 +214,18 @@ create policy "roles admin write" on public.user_roles for all to authenticated
   with check (public.is_admin());
 
 -- ----- learning paths / courses / lessons / chat rooms / live streams
--- Students only see learning content they have been granted access to.
+-- كتالوج الكورسات والمسارات (العناوين/الأوصاف/الصور) عام بالكامل: يظهر
+-- لأي طالب مسجَّل دخول بغض النظر عن تسجيله فيه، ولأي زائر anon أيضاً (سياسة
+-- anon منفصلة أدناه بالقرب من نهاية الملف). عرض القائمة لا علاقة له إطلاقاً
+-- بصلاحيات enrollments — الصلاحيات تُطبَّق فقط عند فتح المحتوى الفعلي
+-- (lessons/quizzes/live_streams أدناه)، التي تبقى مقصورة على المسجَّلين.
 drop policy if exists "learning_paths read auth" on public.learning_paths;
-create policy "learning_paths read auth" on public.learning_paths for select to authenticated
-using (public.is_admin() or exists (select 1 from public.path_enrollments pe where pe.path_id = id and pe.user_id = auth.uid()));
+create policy "learning_paths read auth" on public.learning_paths for select to authenticated using (true);
 drop policy if exists "learning_paths admin write" on public.learning_paths;
 create policy "learning_paths admin write" on public.learning_paths for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 drop policy if exists "courses read auth" on public.courses;
-create policy "courses read auth" on public.courses for select to authenticated
-using (public.is_admin()
-  or exists (select 1 from public.enrollments e where e.course_id = id and e.user_id = auth.uid())
-  or (path_id is not null and exists (select 1 from public.path_enrollments pe where pe.path_id = courses.path_id and pe.user_id = auth.uid()))
-);
+create policy "courses read auth" on public.courses for select to authenticated using (true);
 drop policy if exists "courses admin write" on public.courses;
 create policy "courses admin write" on public.courses for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
@@ -697,21 +696,13 @@ $$;
 grant execute on function public.submit_quiz_attempt(uuid, jsonb) to authenticated;
 
 -- ===================================================================
--- ============== STUDENT CATALOG BROWSING (added) ==============
--- Students may now SEE every course/path (title, description, cover,
--- instructor...) to browse the catalog, but this policy only grants
--- SELECT — it does NOT touch the "courses admin write" / "learning_paths
--- admin write" policies above, so creating/editing/deleting is still
--- admin-only. Actual content (lessons, quizzes, files) stays gated by
--- the enrollment-based policies already defined above, so a course a
--- student can now "see" in the catalog still has zero visible lessons/
--- quizzes for them until an admin enrolls them.
+-- ملاحظة: سياسات القراءة العامة لكتالوج الكورسات/المسارات (للطلاب
+-- المسجَّلين دخول ولزوّار anon) موحَّدة الآن في مكان واحد فقط أعلى الملف
+-- (قسم "learning paths / courses / lessons / chat rooms / live streams")
+-- وقسم "PUBLIC GUEST CATALOG BROWSING" بالأسفل — تفادياً لتكرار نفس
+-- السياسة في أكثر من مكان، لأن أي تشغيل جزئي للملف قد يترك الحالة
+-- القديمة (المقيَّدة بـ enrollments) فعّالة بالخطأ.
 -- ===================================================================
-drop policy if exists "learning_paths read auth" on public.learning_paths;
-create policy "learning_paths read auth" on public.learning_paths for select to authenticated using (true);
-
-drop policy if exists "courses read auth" on public.courses;
-create policy "courses read auth" on public.courses for select to authenticated using (true);
 
 -- ============== "RECORD" LESSON TYPE (added) ==============
 -- Adds a 4th lesson type so admins can tell a recorded live session
@@ -1121,3 +1112,87 @@ as $$
   where p.id = any(p_ids)
 $$;
 grant execute on function public.chat_presence(uuid[]) to authenticated;
+
+-- ===================================================================
+-- ============== PUBLIC GUEST CATALOG BROWSING (added) ==============
+-- يسمح لأي زائر (غير مسجَّل دخول، دور anon في Supabase) بتصفّح عناوين
+-- وأوصاف وصور الكورسات والمسارات فقط من صفحة تسجيل الدخول ("الأقسام")
+-- دون الحاجة لإنشاء حساب. هذا لا يفتح أي محتوى فعلي على الإطلاق: كل
+-- الجداول الأخرى (lessons, quizzes, quiz_questions, chat_*, live_streams,
+-- enrollments, profiles...) تبقى سياساتها "to authenticated" فقط كما هي،
+-- فلا يستطيع anon قراءتها إطلاقاً مهما حاول (رابط مباشر، أدوات المطوّر،
+-- تعديل الطلبات...) — الفحص من قاعدة البيانات نفسها (RLS)، وليس من
+-- الواجهة. لو أردت إخفاء كورس/مسار معيّن من كتالوج الزوار مستقبلاً يمكن
+-- إضافة عمود "is_public boolean default true" وتعديل شرط "using" أدناه.
+-- ===================================================================
+grant select on public.courses to anon;
+grant select on public.learning_paths to anon;
+
+drop policy if exists "courses read anon catalog" on public.courses;
+create policy "courses read anon catalog" on public.courses for select to anon using (true);
+
+drop policy if exists "learning_paths read anon catalog" on public.learning_paths;
+create policy "learning_paths read anon catalog" on public.learning_paths for select to anon using (true);
+
+-- ===================================================================
+-- ============== PER-COURSE LIVE STREAMS (added) ==============
+-- من الآن، كل بث مباشر يُنشَأ من الواجهة مرتبط إجبارياً بكورس محدد
+-- (course_id) والطالب لا يرى ولا يستطيع فتح إلا بث الكورسات المسجَّل
+-- فيها فعلاً (مباشرة عبر enrollments، أو عبر مسار مسجَّل فيه عبر
+-- path_enrollments) — بنفس منطق الحماية المطبَّق على lessons أعلاه،
+-- وليس مجرد إخفاء في الواجهة. أي صف بث قديم بدون course_id (من قبل هذا
+-- التحديث) يصبح مخفياً تلقائياً عن كل الطلاب (الأدمن فقط يراه ويقدر
+-- يحذفه أو يعيد بثه مرتبطاً بكورس)، بدل أن يظهر لكل الطلاب كما كان سابقاً.
+-- ===================================================================
+create index if not exists idx_live_streams_course on public.live_streams(course_id);
+
+drop policy if exists "live_streams read auth" on public.live_streams;
+create policy "live_streams read auth" on public.live_streams for select to authenticated
+using (
+  public.is_admin()
+  or (
+    public.session_ok()
+    and live_streams.course_id is not null
+    and (
+      exists (select 1 from public.enrollments e where e.course_id = live_streams.course_id and e.user_id = auth.uid())
+      or exists (
+        select 1 from public.courses c
+        join public.path_enrollments pe on pe.path_id = c.path_id
+        where c.id = live_streams.course_id and pe.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+drop policy if exists "live_streams admin write" on public.live_streams;
+create policy "live_streams admin write" on public.live_streams for all to authenticated
+using (public.is_admin()) with check (public.is_admin());
+
+-- ===================================================================
+-- ============== HOTFIX: PUBLIC CATALOG VISIBILITY (FINAL) ==============
+-- هذا القسم مستقل تماماً وآمن لإعادة التشغيل بمفرده في أي وقت (بدون
+-- تنفيذ باقي الملف) — انسخه فقط والصقه في SQL Editor إذا كانت مشكلة
+-- "الأقسام تظهر لا يوجد محتوى رغم وجود كورسات ومسارات" ما زالت قائمة
+-- على مشروعك الحالي (يحدث هذا عادة لو كان مشروعك يشغّل نسخة أقدم من
+-- سياسات RLS قبل إضافة الكتالوج العام). ينفّذ نفس التأثير الموجود أعلى
+-- الملف تماماً، فلا يغيّر أي شيء آخر: لا يمس صلاحيات المحاضرات/الاختبارات/
+-- البث المباشر/الشات/enrollments، ولا صلاحيات الأدمن على الكتابة.
+--
+-- النتيجة: أي طالب مسجَّل دخول (authenticated)، وأي زائر غير مسجَّل
+-- (anon)، يقدر يقرأ عناوين/أوصاف/صور كل الكورسات والمسارات — بدون أي
+-- شرط enrollment — بينما فتح المحتوى الفعلي يبقى محمياً كما هو.
+-- ===================================================================
+grant select on public.courses to anon, authenticated;
+grant select on public.learning_paths to anon, authenticated;
+
+drop policy if exists "courses read auth" on public.courses;
+create policy "courses read auth" on public.courses for select to authenticated using (true);
+
+drop policy if exists "courses read anon catalog" on public.courses;
+create policy "courses read anon catalog" on public.courses for select to anon using (true);
+
+drop policy if exists "learning_paths read auth" on public.learning_paths;
+create policy "learning_paths read auth" on public.learning_paths for select to authenticated using (true);
+
+drop policy if exists "learning_paths read anon catalog" on public.learning_paths;
+create policy "learning_paths read anon catalog" on public.learning_paths for select to anon using (true);

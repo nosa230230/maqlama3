@@ -296,8 +296,8 @@ a {
 }
 
 .login-brand img {
-  width: 34px;
-  height: 34px;
+  width: 50px;
+  height: 50px;
   border-radius: 10px;
   background: #fff;
   object-fit: contain;
@@ -317,12 +317,45 @@ a {
 }
 
 .login-info-panel.open {
-  max-height: 340px;
+  max-height: 420px;
   opacity: 1;
   padding: 18px 20px;
   margin-bottom: 18px;
   box-shadow: var(--shadow-sm);
 }
+.login-info-panel #openSectionsBtn { margin-top: 16px; }
+
+/* ============== Guest catalog (public "الأقسام" browsing) ============== */
+.cat-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.cat-tabs .login-tab { flex: 1; }
+.guest-locked-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: var(--text);
+}
+.guest-locked-hint i { color: var(--primary); font-size: 16px; }
+
+/* ============== Subscribe-now modal ============== */
+.subscribe-box { text-align: center; padding: 6px 0 2px; }
+.subscribe-box .subscribe-ic {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: grid; place-items: center; margin: 0 auto 14px;
+  background: color-mix(in srgb, var(--danger, #ef4444) 14%, var(--surface));
+  color: var(--danger, #ef4444); font-size: 26px;
+}
+.subscribe-box p { color: var(--text); margin-bottom: 18px; }
+.subscribe-actions { display: flex; flex-direction: column; gap: 10px; }
+.subscribe-actions .btn { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.subscribe-actions .fa-whatsapp { color: #25D366; }
+.subscribe-actions .btn-primary .fa-whatsapp { color: #fff; }
+.subscribe-actions .fa-facebook { color: #1877F2; }
 
 .login-welcome {
   text-align: center;
@@ -1986,64 +2019,8 @@ tbody tr:hover {
   text-decoration: underline;
 }
 
-/* ================== Footer: تواصل معنا ================== */
-.footer-social {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-}
 
-.footer-social-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text, #333);
-  direction: rtl;
-}
 
-.footer-social-icons {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.social-link {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--surface-2, #f2f2f2);
-  border: 1px solid var(--border, #e2e2e2);
-  color: var(--primary, #4f46e5);
-  font-size: 15px;
-  text-decoration: none;
-  transition: transform .2s ease, background .2s ease, color .2s ease;
-}
-
-.social-link:hover {
-  background: var(--primary, #4f46e5);
-  color: #fff;
-  transform: translateY(-2px);
-  text-decoration: none;
-}
-
-.social-link.disabled {
-  opacity: .35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-@media (max-width: 480px) {
-  .social-link {
-    width: 32px;
-    height: 32px;
-    font-size: 13px;
-  }
-}
 /* ============== Access control UI (added) ============== */
 /* شارة القفل على بطاقات الكورسات/المسارات غير المسجَّل بها الطالب */
 .course-thumb, .path-thumb { position: relative; }
@@ -2106,3 +2083,51 @@ tbody tr:hover {
   padding: 0 22px 22px;
 }
 .section.acc.open .acc-body { display: block; }
+
+
+
+
+
+
+
+
+.login-footer {
+  width: 100%;
+  text-align: center;
+  margin-top: -40px;
+  padding: 18px 15px;
+}
+
+.contact-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.social-icons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.social-icons a {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-size: 21px;
+  transition: 0.25s;
+}
+
+.social-icons a:hover {
+  transform: translateY(-20px);
+}
+
+.footer-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  opacity: 0.7;
+}

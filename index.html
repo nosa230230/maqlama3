@@ -56,17 +56,21 @@
     </header>
 
     <div class="login-info-panel" id="loginInfoPanel">
-      <p class="brand-tag">منصتك التعليمية الحديثة — تعلّم في أي وقت ومن أي مكان.</p>
+      <p class="brand-tag">منصتك التعليمية مَقْلَمَة — تعلّم في أي وقت ومن أي مكان.</p>
       <ul class="login-feats">
         <li><i class="fas fa-check-circle"></i> كورسات تفاعلية ومحاضرات فيديو</li>
         <li><i class="fas fa-check-circle"></i> ملفات PDF ومصادر تعليمية</li>
-        <li><i class="fas fa-check-circle"></i> شات مباشر مع المدرسين والزملاء</li>
+                <li><i class="fas fa-check-circle"></i> تدريبات وامتحانات</li>
+        <li><i class="fas fa-check-circle"></i> بث مباشر لكل كورس على حِدة</li>
         <li><i class="fas fa-check-circle"></i> تتبع تقدّمك ومتابعة إنجازك</li>
       </ul>
+      <button type="button" class="btn btn-primary btn-block" id="openSectionsBtn">
+        <i class="fas fa-layer-group"></i> الأقسام — تصفّح كل الكورسات والمسارات
+      </button>
     </div>
 
     <div class="login-welcome">
-      <span class="welcome-badge"><i class="fas fa-hand-sparkles"></i> مرحبًا بك مرة أخرى</span>
+      <span class="welcome-badge"><i class=""></i> مرحبًا بك مرة أخرى</span>
       <h1>تسجيل الدخول</h1>
       <p class="muted">سجّل دخولك للوصول إلى الدورات التدريبية والمحتوى التعليمي</p>
     </div>
@@ -121,7 +125,6 @@
       <a class="nav-item active" data-view="dashboard"><i class="fas fa-gauge-high"></i><span>الرئيسية</span></a>
       <a class="nav-item" data-view="courses"><i class="fas fa-book-open"></i><span>الكورسات</span></a>
       <a class="nav-item" data-view="paths"><i class="fas fa-route"></i><span>المسارات التعليمية</span></a>
-      <a class="nav-item" data-view="chat"><i class="fas fa-comments"></i><span>الشات</span></a>
       <a class="nav-item" data-view="live"><i class="fas fa-tower-broadcast"></i><span>البث المباشر</span><span class="live-dot" id="liveDot" style="display:none"></span></a>
       <a class="nav-item admin-only" data-view="students"><i class="fas fa-user-graduate"></i><span>الطلاب</span></a>
       <a class="nav-item admin-only" data-view="manageCourses"><i class="fas fa-folder-tree"></i><span>إدارة الكورسات</span></a>
@@ -175,17 +178,24 @@
 
 <script src="script.js"></script>
 <footer class="site-footer">
-  <div id="footerSocial" class="footer-social"></div>
-  <div>
-    Design by
-    <a
-      href="https://www.facebook.com/share/195CtvZHs7/"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      Handala
+<div class="social">
+<footer class="login-footer">
+  <div class="contact-title">للتواصل معنا</div>
+
+  <div class="social-icons">
+    <a href="https://www.facebook.com/share/16b9AZDVXt/" target="_blank" aria-label="Facebook">
+      <i class="fab fa-facebook-f"></i>
+    </a>
+
+    <a href="https://wa.me/201062970993" target="_blank" aria-label="WhatsApp">
+      <i class="fab fa-whatsapp"></i>
     </a>
   </div>
+
+  <div class="footer-copy">
+    © 2026 جميع الحقوق محفوظة
+  مَقْلَمَة</div>
+</footer>
 </footer>
 </body>
 </html>
